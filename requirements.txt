@@ -1,0 +1,8 @@
+FastAPI
+psycopg2-binary
+pgvector
+openai
+uvicorn
+psycopg[binary]
+sqlalchemy
+python-dotenv

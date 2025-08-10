@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.env/
+.venv/
+ENV/
+
+# Environment variables and secrets
+*.env
+aletheia_api.env
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Static and cache
+*.sqlite3
+.cache/
+
+# Node/npm (if you add frontend tooling)
+node_modules/

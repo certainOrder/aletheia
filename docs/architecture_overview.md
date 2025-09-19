@@ -188,6 +188,9 @@ graph TD;
 * [ ] Memory shard editing endpoints
 * [ ] IVFFlat index for performance
 * [ ] Multi-user support (auth + RLS)
+* [ ] 🔁 Turn Indexing & Token Budgeting (Before inference, build a budgeted prompt chain, stopping at your token ceiling (e.g. 40k))
+* [ ] 🎒 Memory Compression (Turn past high-impact turns into summary embeddings)
+* [ ] ⚙️ LTM Injection Parameters (Use a weighted score to select top memory entries per inference)
 * [ ] README + diagram added to repo (← this doc 😘)
 
 ---

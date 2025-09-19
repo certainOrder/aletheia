@@ -1,0 +1,110 @@
+# Development Environment
+
+This doc explains how to run Aletheia locally for development, both with Docker Compose and directly on your host, and how to perform quick smoke tests.
+
+## Prerequisites
+
+- Docker Desktop (recommended path) or a working local Python 3.11 environment
+- macOS (tested), zsh shell
+- Optional: an OpenAI API key if you want to use real API calls instead of the built-in dev fallbacks
+
+## Environment variables
+
+Copy `.env.example` to `.env` and adjust as needed.
+
+- `DATABASE_URL`:
+  - Direct (no Docker): `postgresql+psycopg://postgres:postgres@localhost:5432/aletheia`
+  - Docker Compose: `postgresql+psycopg://postgres:postgres@db:5432/aletheia`
+- `OPENAI_API_KEY`: Only needed if you want real OpenAI calls in dev.
+- `OPENAI_CHAT_MODEL`: Defaults to `gpt-4o`.
+- `OPENAI_EMBEDDING_MODEL`: Defaults to `text-embedding-3-small`.
+- `EMBEDDING_DIM`: Defaults to `1536` and must match the DB vector column dim.
+- `ALLOWED_ORIGINS`: Comma-separated list for CORS.
+- `DEV_FALLBACKS`: When `true`, the API uses deterministic local fallbacks for embeddings and chat so you can develop without an OpenAI key. Defaults to `false` in `.env.example`; set to `true` for local Docker runs in `.env`.
+
+### Recommended `.env` for Docker Compose
+
+```
+DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/aletheia
+POSTGRES_DB=aletheia
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+DEV_FALLBACKS=true
+```
+
+## Run with Docker Compose (recommended)
+
+1) Build and start services:
+
+```bash
+docker compose up -d --build
+```
+
+Services:
+- Postgres with pgvector: `localhost:5432`
+- API (FastAPI): `http://localhost:8000`
+- OpenWebUI: `http://localhost:3000`
+
+2) Verify health:
+
+```bash
+curl -s http://localhost:8000/health
+curl -s http://localhost:8000/v1/models
+```
+
+3) Index some content:
+
+```bash
+curl -s -X POST http://localhost:8000/index-memory \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"OpenAI released new embedding models.","metadata":{"source":"smoke-test"}}'
+```
+
+4) RAG chat query:
+
+```bash
+curl -s -X POST http://localhost:8000/rag-chat \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"OpenAI released new embedding models.","top_k":3}'
+```
+
+5) OpenAI-compatible chat completions (for OpenWebUI):
+
+```bash
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"OpenAI released new embedding models."}]}'
+```
+
+If `DEV_FALLBACKS=true`, responses are generated locally; otherwise, real OpenAI calls are made (requires `OPENAI_API_KEY`).
+
+## Run directly on host (advanced)
+
+1) Ensure Postgres with pgvector is available locally and `DATABASE_URL` points to it.
+2) Create a Python 3.11 venv and install deps:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+3) Start API:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+4) Run the same smoke tests listed above (use your local Postgres connection settings).
+
+## Troubleshooting
+
+- Compose warning: `version` is obsolete — safe to ignore; we’ll remove it later.
+- DB fails to start: ensure `POSTGRES_DB/USER/PASSWORD` are set in `.env` and `DATABASE_URL` host is `db`.
+- 401 from OpenAI: set `DEV_FALLBACKS=true` in `.env` for local development or provide a valid `OPENAI_API_KEY`.
+- No context retrieved in RAG: ensure you indexed content first via `/index-memory`.
+
+## Notes
+
+- Dev fallbacks are meant for local usage only. Consider guarding these behind `DEV_FALLBACKS=false` in production deployments.
+- Current similarity metric is L2 distance. Consider adding cosine distance and IVFFlat index for scale.

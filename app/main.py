@@ -86,7 +86,11 @@ async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
     ]
     service = OpenAIService()
     response = service.chat(messages)
-    answer = response.choices[0].message.content
+    # Support both dict fallback and OpenAI SDK response
+    if isinstance(response, dict):
+        answer = response["choices"][0]["message"]["content"]
+    else:
+        answer = response.choices[0].message.content
     return {"answer": answer, "context": results}
 
 
@@ -149,14 +153,20 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
 
     service = OpenAIService()
     resp = service.chat(messages, model=model)
-    content = resp.choices[0].message.content
+    # Support dict fallback and SDK response shape
+    if isinstance(resp, dict):
+        content = resp["choices"][0]["message"]["content"]
+        resp_model = resp.get("model", model or OPENAI_CHAT_MODEL)
+    else:
+        content = resp.choices[0].message.content
+        resp_model = resp.model
     completion_id = f"chatcmpl-{uuid4()}"
     created = int(_time())
     out = {
         "id": completion_id,
         "object": "chat.completion",
         "created": created,
-        "model": model or resp.model,
+    "model": resp_model,
         "choices": [
             {
                 "index": 0,

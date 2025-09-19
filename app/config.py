@@ -30,3 +30,6 @@ EMBEDDING_DIM = int(_emb_dim)
 # CORS
 _origins = env("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080") or "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080"
 ALLOWED_ORIGINS = [o.strip() for o in _origins.split(",") if o.strip()]
+
+# Development fallbacks (disable external providers in dev)
+DEV_FALLBACKS = (env("DEV_FALLBACKS", "false") or "false").lower() in {"1", "true", "yes", "on"}

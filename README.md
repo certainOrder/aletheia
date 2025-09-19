@@ -2,6 +2,8 @@
 
 This project is an API that interfaces between an OpenAI CustomGPT and a local PostgreSQL database using pgvector embeddings. It is designed to facilitate the interaction between the AI model and the database, allowing for efficient storage and retrieval of embeddings.
 
+For local development and smoke test instructions, see docs/DEV_ENVIRONMENT.md.
+
 ## Project Structure
 
 ```

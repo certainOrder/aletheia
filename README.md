@@ -73,6 +73,21 @@ aletheia
 - Phase 1 scope: `docs/Implementation_Plan_Phase_1.md`.
 - Phase 2 plan: `docs/Phase_2_Plan.md`.
 
+## Contributing (dev setup)
+
+1. Create a virtual environment and install dev tools:
+   ```bash
+   make setup
+   ```
+2. Run linters/type-checkers locally:
+   ```bash
+   make lint format typecheck
+   ```
+3. Run tests:
+   ```bash
+   make test
+   ```
+
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for more details.

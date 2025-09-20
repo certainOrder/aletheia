@@ -58,10 +58,10 @@ Key context updates since initial draft:
   - [ ] Ensure chunk tags/metadata are propagated; add `source`/`metadata` fields if needed (covered in M3).
 
 - Conversation history & token budget
-  - [ ] Add `HISTORY_TURNS` to config (default 5).
-  - [ ] Assemble prompt with last N turns + retrieved context.
-  - [ ] Implement a simple token budget and truncate history/context if above ceiling (configurable, e.g., 40k tokens).
-  - [ ] Log truncation decisions and final prompt token count for observability.
+  - [x] Add `HISTORY_TURNS` to config (default 5).
+  - [x] Assemble prompt with last N turns + retrieved context.
+  - [x] Implement a simple token budget and truncate history/context if above ceiling (configurable, e.g., 40k tokens).
+  - [x] Log truncation decisions and final prompt token count for observability.
 
 - Observability & logs
   - [ ] Log search metric used, `top_k`, and include `score` per item in debug logs.

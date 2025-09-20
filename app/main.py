@@ -25,6 +25,12 @@ from app.config import (
     OPENAI_API_KEY,
     OPENAI_CHAT_MODEL,
 )
+from app.config import (
+    CHUNK_OVERLAP as DEFAULT_CHUNK_OVERLAP,
+)
+from app.config import (
+    CHUNK_SIZE as DEFAULT_CHUNK_SIZE,
+)
 from app.db import engine, get_db
 from app.db.models import Base
 from app.error_handlers import (
@@ -37,11 +43,14 @@ from app.schemas import (
     ChatRequest,
     IndexMemoryRequest,
     IndexMemoryResponse,
+    IngestRequest,
+    IngestResponse,
     RAGChatRequest,
     RAGChatResponse,
 )
 from app.security import SecurityHeadersMiddleware
 from app.services.openai_service import OpenAIService
+from app.utils.chunking import chunk_text
 from app.utils.embeddings import (
     convert_to_embedding,
     save_embedding_to_db,
@@ -212,6 +221,45 @@ async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
     )
     logger.info("route_index_memory_result", extra={"shard_id": str(shard.id)})
     return {"id": str(shard.id)}
+
+
+@app.post(
+    "/ingest",
+    tags=["indexing"],
+    response_model=IngestResponse,
+)
+async def ingest(req: IngestRequest, db: Session = Depends(get_db)):
+    """Chunk large content and index each chunk as a separate shard.
+
+    Uses CHUNK_SIZE and CHUNK_OVERLAP from config. Tags and user_id are propagated.
+    """
+    _ensure_openai_ready()
+    # Read chunking params from env at request time to allow tests to override
+    from app.config import env as _env
+
+    _chunk_size = int(_env("CHUNK_SIZE", str(DEFAULT_CHUNK_SIZE)) or str(DEFAULT_CHUNK_SIZE))
+    _chunk_overlap = int(
+        _env("CHUNK_OVERLAP", str(DEFAULT_CHUNK_OVERLAP)) or str(DEFAULT_CHUNK_OVERLAP)
+    )
+    logger.info(
+        "route_ingest",
+        extra={
+            "content_len": len(req.content or ""),
+            "tags_count": len(req.tags or []),
+            "chunk_size": _chunk_size,
+            "chunk_overlap": _chunk_overlap,
+        },
+    )
+    chunks = chunk_text(req.content, _chunk_size, _chunk_overlap)
+    ids: list[str] = []
+    for ch in chunks:
+        emb = convert_to_embedding(ch)
+        shard = save_embedding_to_db(
+            db=db, content=ch, embedding=emb, user_id=req.user_id, tags=req.tags
+        )
+        ids.append(str(shard.id))
+    logger.info("route_ingest_result", extra={"chunk_count": len(ids)})
+    return {"ids": ids}
 
 
 # OpenAI-compatible chat completions endpoint for OpenWebUI

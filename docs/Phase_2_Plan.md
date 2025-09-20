@@ -52,9 +52,9 @@ Key context updates since initial draft:
   - [x] Add a small script or docs snippet to `ANALYZE` after index creation.
 
 - Chunking & ingestion
-  - [ ] Add `CHUNK_SIZE` and `CHUNK_OVERLAP` to config with sensible defaults (e.g., 800/100).
-  - [ ] Implement a chunker utility for long text ingestion (preserve sentence boundaries where possible).
-  - [ ] Update `/index-memory` (or add `/ingest`) to split content and create multiple shards.
+  - [x] Add `CHUNK_SIZE` and `CHUNK_OVERLAP` to config with sensible defaults (e.g., 800/100).
+  - [x] Implement a chunker utility for long text ingestion (sentence-aware heuristic with fallback slicing).
+  - [x] Add `/ingest` endpoint to split content and create multiple shards; env overrides respected at request time.
   - [ ] Ensure chunk tags/metadata are propagated; add `source`/`metadata` fields if needed (covered in M3).
 
 - Conversation history & token budget

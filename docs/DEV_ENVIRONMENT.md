@@ -21,7 +21,9 @@ Copy `.env.example` to `.env` and adjust as needed.
 - `EMBEDDING_DIM`: Defaults to `1536` and must match the DB vector column dim.
 - `ALLOWED_ORIGINS`: Comma-separated list for CORS.
 - `DEV_FALLBACKS`: When `true`, the API uses deterministic local fallbacks for embeddings and chat so you can develop without an OpenAI key. Defaults to `false` in `.env.example`; set to `true` for local Docker runs in `.env`.
- - `SIMILARITY_METRIC`: Retrieval metric; defaults to `cosine`.
+- `SIMILARITY_METRIC`: Retrieval metric; defaults to `cosine`.
+- `CHUNK_SIZE`: Maximum characters per chunk during ingestion; defaults to `800`.
+- `CHUNK_OVERLAP`: Overlapping characters between consecutive chunks; defaults to `100`.
  - `PGVECTOR_ENABLE_IVFFLAT`: When `true` (default), Alembic migration `0003` creates an IVFFlat index on `memory_shards.embedding` using the cosine opclass.
  - `PGVECTOR_IVFFLAT_LISTS`: Number of lists for IVFFlat (default `100`). Higher values improve recall at the cost of index size and build time.
 

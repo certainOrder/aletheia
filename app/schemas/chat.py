@@ -27,3 +27,11 @@ class IndexMemoryRequest(BaseModel):
     content: str
     user_id: str | None = None
     tags: list[str] | None = None
+
+
+class IngestRequest(BaseModel):
+    """Ingest large content by chunking and indexing each chunk."""
+
+    content: str
+    user_id: str | None = None
+    tags: list[str] | None = None

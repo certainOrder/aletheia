@@ -13,6 +13,12 @@ class IndexMemoryResponse(BaseModel):
     id: str = Field(..., description="UUID of the created memory shard")
 
 
+class IngestResponse(BaseModel):
+    """Response for `/ingest` containing IDs of created shards."""
+
+    ids: list[str] = Field(..., description="UUIDs of created memory shards")
+
+
 class RetrievedContextItem(BaseModel):
     id: str
     content: str

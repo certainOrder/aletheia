@@ -33,6 +33,12 @@ EMBEDDING_DIM: int = int(_emb_dim_str)
 # Retrieval metric (cosine or l2). Default to cosine for OpenAI embeddings
 SIMILARITY_METRIC: str = (env("SIMILARITY_METRIC", "cosine") or "cosine").lower()
 
+# Chunking configuration (character-based with optional sentence awareness)
+_chunk_size_str: str = env("CHUNK_SIZE", "800") or "800"
+CHUNK_SIZE: int = int(_chunk_size_str)
+_chunk_overlap_str: str = env("CHUNK_OVERLAP", "100") or "100"
+CHUNK_OVERLAP: int = int(_chunk_overlap_str)
+
 # pgvector IVFFlat tuning
 _ivf_lists_str: str = env("PGVECTOR_IVFFLAT_LISTS", "100") or "100"
 PGVECTOR_IVFFLAT_LISTS: int = int(_ivf_lists_str)

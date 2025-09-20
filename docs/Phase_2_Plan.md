@@ -37,6 +37,48 @@ Key context updates since initial draft:
   - Ingesting large text creates multiple chunks and improves recall in tests.
   - The final prompt includes the last N conversation turns; N is configurable and enforced with a token budget.
 
+#### M2 Implementation Checklist
+
+- Retrieval metric and scores
+  - [ ] Add `SIMILARITY_METRIC=cosine` to config with default `cosine`.
+  - [ ] Update `semantic_search` to use cosine distance for ordering (`pgvector` cosine).
+  - [ ] Include `score` in each returned context item and in logs; document score semantics.
+  - [ ] Expose scores in `/v1/chat/completions` response under `aletheia_context`.
+
+- IVFFlat index for performance
+  - [ ] Add `PGVECTOR_IVFFLAT_LISTS` to config (default 100) and doc trade-offs.
+  - [ ] Create Alembic migration to add IVFFlat index on `memory_shards.embedding` (cosine opclass).
+  - [ ] Optionally gate index creation behind an env toggle to defer building on empty DBs.
+  - [ ] Add a small script or docs snippet to `ANALYZE` after index creation.
+
+- Chunking & ingestion
+  - [ ] Add `CHUNK_SIZE` and `CHUNK_OVERLAP` to config with sensible defaults (e.g., 800/100).
+  - [ ] Implement a chunker utility for long text ingestion (preserve sentence boundaries where possible).
+  - [ ] Update `/index-memory` (or add `/ingest`) to split content and create multiple shards.
+  - [ ] Ensure chunk tags/metadata are propagated; add `source`/`metadata` fields if needed (covered in M3).
+
+- Conversation history & token budget
+  - [ ] Add `HISTORY_TURNS` to config (default 5).
+  - [ ] Assemble prompt with last N turns + retrieved context.
+  - [ ] Implement a simple token budget and truncate history/context if above ceiling (configurable, e.g., 40k tokens).
+  - [ ] Log truncation decisions and final prompt token count for observability.
+
+- Observability & logs
+  - [ ] Log search metric used, `top_k`, and include `score` per item in debug logs.
+  - [ ] Add structured events for `index_build`, `analyze`, and `retrieval_scores`.
+
+- Tests
+  - [ ] Unit: verify ordering by cosine score (descending) and score presence in API output.
+  - [ ] Unit: chunking splits long input into multiple shards as expected.
+  - [ ] Unit: prompt assembly respects `HISTORY_TURNS` and token budget; truncation occurs when needed.
+  - [ ] Migration: ensure Alembic upgrade/downgrade for IVFFlat runs without data loss.
+  - [ ] Offline-friendly: mock OpenAI where required; avoid network in CI.
+
+- Docs
+  - [ ] Update `DEV_ENVIRONMENT.md` with new envs and tuning tips (metric, lists, chunk sizes, history, token budget).
+  - [ ] Update `architecture_overview.md` references to explicitly note cosine + IVFFlat and score exposure.
+  - [ ] Add a short `DB_MIGRATIONS.md` note about IVFFlat creation timing and ANALYZE guidance.
+
 ### M3: Schema migrations (extensions)
 - Use existing Alembic setup to add: IVFFlat index operations, `source` and `metadata` (JSONB) on content table(s) as needed.
 - Ensure `raw_conversations` persistence on chat calls (request/response metadata, model, provider, request_id) matches the architecture.

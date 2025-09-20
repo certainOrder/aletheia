@@ -25,15 +25,15 @@ hooks: $(VENV)/bin/activate
 	$(PRECOMMIT) install
 
 lint: $(VENV)/bin/activate
-	$(RUFF) check .
+	$(RUFF) check app alembic
 
 format: $(VENV)/bin/activate
-	$(RUFF) check . --fix || true
-	$(RUFF) format .
-	$(BLACK) .
+	$(RUFF) check app alembic --fix || true
+	$(RUFF) format app alembic
+	$(BLACK) app alembic
 
 typecheck: $(VENV)/bin/activate
-	$(MYPY) .
+	$(MYPY) app
 
 test: $(VENV)/bin/activate
 	$(PYTEST) -q --cov=app --cov-report=term-missing --cov-fail-under=85
@@ -57,3 +57,18 @@ compose-rebuild:
 
 compose-logs:
 	docker compose logs -f
+
+# --- Alembic helpers ---
+
+ALEMBIC=$(VENV)/bin/alembic
+
+.PHONY: migrate-rev migrate-up migrate-down
+
+migrate-rev: $(VENV)/bin/activate
+	$(ALEMBIC) revision -m "$(m)"
+
+migrate-up: $(VENV)/bin/activate
+	$(ALEMBIC) upgrade head
+
+migrate-down: $(VENV)/bin/activate
+	$(ALEMBIC) downgrade -1

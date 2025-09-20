@@ -119,3 +119,24 @@ In logs you should see JSON entries including `request_id: "abc-123"`.
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for more details.
+
+## API Endpoints & Schemas
+
+- Endpoints:
+   - `GET /` — Liveness
+   - `GET /api/health` — Health probe
+   - `POST /openai-chat` — Simple prompt to OpenAI (or dev fallback)
+   - `POST /index-memory` — Index content with an embedding
+   - `POST /rag-chat` — Retrieve-augment-answer using stored context
+   - `POST /v1/chat/completions` — OpenAI-compatible endpoint for OpenWebUI
+   - `GET /v1/models` — OpenAI-compatible model listing
+
+- Schemas:
+   - Requests: `ChatRequest`, `IndexMemoryRequest`, `RAGChatRequest`
+   - Responses: `IndexMemoryResponse`, `RAGChatResponse`
+
+OpenAPI docs are available at:
+
+```
+http://localhost:8000/docs
+```

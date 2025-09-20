@@ -3,6 +3,7 @@ line-length = 100
 exclude = [
   ".venv",
   "venv",
+  "lib",
   "node_modules",
   "__pycache__",
   "build",
@@ -39,3 +40,4 @@ exclude = [
 [tool.black]
 line-length = 100
 target-version = ["py311"]
+extend-exclude = "^(\\.venv|venv|lib|node_modules|openwebui-data|build|dist)/"

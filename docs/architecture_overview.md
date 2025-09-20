@@ -1,6 +1,6 @@
 # 🧠 Aletheia Phase 1 RAG Architecture Overview
 
-**Last updated:** 2025-09-19  
+**Last updated:** 2025-09-19
 **Target audience:** Engineers integrating or extending the RAG pipeline
 
 ---

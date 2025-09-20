@@ -26,7 +26,13 @@ from app.error_handlers import (
     handle_validation_error,
 )
 from app.logging_utils import RequestIdMiddleware, configure_logging
-from app.schemas import ChatRequest, IndexMemoryRequest, RAGChatRequest
+from app.schemas import (
+    ChatRequest,
+    IndexMemoryRequest,
+    IndexMemoryResponse,
+    RAGChatRequest,
+    RAGChatResponse,
+)
 from app.security import SecurityHeadersMiddleware
 from app.services.openai_service import OpenAIService
 from app.utils.embeddings import (
@@ -77,7 +83,7 @@ app.include_router(api_router, prefix="/api")
 
 
 # POST endpoint to test OpenAI integration
-@app.post("/openai-chat")
+@app.post("/openai-chat", tags=["chat"], response_model=dict)
 async def openai_chat(request: ChatRequest):
     """Invoke the OpenAI service (or fallback) with a simple prompt payload."""
     service = OpenAIService()
@@ -85,13 +91,17 @@ async def openai_chat(request: ChatRequest):
     return {"response": response}
 
 
-@app.get("/")
+@app.get("/", tags=["misc"], summary="Liveness root")
 def read_root():
     """Basic liveness message for root path."""
     return {"message": "Hello, World!"}
 
 
-@app.post("/rag-chat")
+@app.post(
+    "/rag-chat",
+    tags=["rag"],
+    response_model=RAGChatResponse,
+)
 async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
     """RAG flow: embed query, retrieve context, and call chat provider (or fallback)."""
     query_vec = convert_to_embedding(req.prompt)
@@ -116,7 +126,11 @@ async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
     return {"answer": answer, "context": results}
 
 
-@app.post("/index-memory")
+@app.post(
+    "/index-memory",
+    tags=["indexing"],
+    response_model=IndexMemoryResponse,
+)
 async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
     """Compute an embedding for content and persist it as a memory shard."""
     emb = convert_to_embedding(req.content)
@@ -127,7 +141,7 @@ async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
 
 
 # OpenAI-compatible chat completions endpoint for OpenWebUI
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", tags=["openai-compat"], response_model=dict)
 async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
     """OpenAI-compatible Chat Completions endpoint with optional RAG context injection."""
     # Expecting { model?: str, messages: [{role, content}, ...], stream?: bool }
@@ -180,7 +194,7 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
     return out
 
 
-@app.get("/v1/models")
+@app.get("/v1/models", tags=["openai-compat"], response_model=dict)
 async def v1_models():
     """List available models, compatible with OpenAI `/v1/models`."""
     return {

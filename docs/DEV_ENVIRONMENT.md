@@ -21,9 +21,13 @@ Copy `.env.example` to `.env` and adjust as needed.
 - `EMBEDDING_DIM`: Defaults to `1536` and must match the DB vector column dim.
 - `ALLOWED_ORIGINS`: Comma-separated list for CORS.
 - `DEV_FALLBACKS`: When `true`, the API uses deterministic local fallbacks for embeddings and chat so you can develop without an OpenAI key. Defaults to `false` in `.env.example`; set to `true` for local Docker runs in `.env`.
-- `SIMILARITY_METRIC`: Retrieval metric; defaults to `cosine`.
+ - `SIMILARITY_METRIC`: Retrieval metric; defaults to `cosine` (recommended for OpenAI embeddings).
 - `CHUNK_SIZE`: Maximum characters per chunk during ingestion; defaults to `800`.
 - `CHUNK_OVERLAP`: Overlapping characters between consecutive chunks; defaults to `100`.
+ - `HISTORY_TURNS`: Number of recent user turns to retain when assembling prompts; defaults to `5`.
+ - `MAX_PROMPT_TOKENS`: Approximate upper bound for prompt tokens; defaults to `40000`. The server will
+   drop oldest history first, then truncate context, and finally trim the last user message to remain
+   within this budget.
  - `PGVECTOR_ENABLE_IVFFLAT`: When `true` (default), Alembic migration `0003` creates an IVFFlat index on `memory_shards.embedding` using the cosine opclass.
  - `PGVECTOR_IVFFLAT_LISTS`: Number of lists for IVFFlat (default `100`). Higher values improve recall at the cost of index size and build time.
 
@@ -113,6 +117,11 @@ Key log events (JSON formatted):
 - `semantic_search` — retrieval stats: `limit`, `user_id`, `result_count`.
 - `chat_request` / `chat_result` — provider used and result choice count.
 - `completion_result` — final completion with `model`, `content_len`, `context_count`.
+ - `history_trim` — number of history messages dropped to satisfy `HISTORY_TURNS`.
+ - `token_budget_drop_history` — oldest history entry dropped due to token budget.
+ - `token_budget_trim_context` — retrieved context truncated to fit the prompt budget.
+ - `token_budget_trim_last_user` — last user message truncated to fit the prompt budget.
+ - `token_budget_enforced` — summary of token counts pre-/post-enforcement and the budget ceiling.
 
 Each log line includes a `request_id` header for correlation. The response also returns `X-Request-ID`.
 
@@ -172,7 +181,7 @@ If the key is missing/invalid while `DEV_FALLBACKS=false`, you should see a clea
 ## Notes
 
 - Dev fallbacks are meant for local usage only. Consider guarding these behind `DEV_FALLBACKS=false` in production deployments.
-- Current similarity metric is L2 distance. Consider adding cosine distance and IVFFlat index for scale.
+- Retrieval uses cosine similarity by default and surfaces scores in API responses (`aletheia_context`). IVFFlat indexing is available and gated by env.
 
 ## Logging and Error Model (dev)
 

@@ -41,11 +41,25 @@ def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
     if enable:
+        # Observability: emit a lightweight structured event via a SELECT (visible in logs)
+        op.execute(
+            "SELECT json_build_object("
+            "'event','index_build',"
+            "'index','ix_memory_shards_embedding_ivfflat_cosine',"
+            "'lists', %s)",
+            (lists,),
+        )
         op.execute(
             "CREATE INDEX IF NOT EXISTS ix_memory_shards_embedding_ivfflat_cosine "
             f"ON memory_shards USING ivfflat (embedding vector_cosine_ops) WITH (lists = {lists})"
         )
         # Help the planner choose the index
+        op.execute(
+            "SELECT json_build_object("
+            "'event','analyze',"
+            "'table','memory_shards',"
+            "'index','ix_memory_shards_embedding_ivfflat_cosine')"
+        )
         op.execute("ANALYZE memory_shards")
 
 

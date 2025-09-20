@@ -58,26 +58,26 @@ Key context updates since initial draft:
   - [ ] Ensure chunk tags/metadata are propagated; add `source`/`metadata` fields if needed (covered in M3).
 
 - Conversation history & token budget
-  - [ ] Add `HISTORY_TURNS` to config (default 5).
-  - [ ] Assemble prompt with last N turns + retrieved context.
-  - [ ] Implement a simple token budget and truncate history/context if above ceiling (configurable, e.g., 40k tokens).
-  - [ ] Log truncation decisions and final prompt token count for observability.
+  - [x] Add `HISTORY_TURNS` to config (default 5).
+  - [x] Assemble prompt with last N turns + retrieved context.
+  - [x] Implement a simple token budget and truncate history/context if above ceiling (configurable, e.g., 40k tokens).
+  - [x] Log truncation decisions and final prompt token count for observability.
 
 - Observability & logs
-  - [ ] Log search metric used, `top_k`, and include `score` per item in debug logs.
-  - [ ] Add structured events for `index_build`, `analyze`, and `retrieval_scores`.
+  - [x] Log search metric used, `top_k`, and include `score` per item in debug logs.
+  - [x] Add structured events for `index_build`, `analyze`, and `retrieval_scores`.
 
 - Tests
-  - [ ] Unit: verify ordering by cosine score (descending) and score presence in API output.
-  - [ ] Unit: chunking splits long input into multiple shards as expected.
-  - [ ] Unit: prompt assembly respects `HISTORY_TURNS` and token budget; truncation occurs when needed.
-  - [ ] Migration: ensure Alembic upgrade/downgrade for IVFFlat runs without data loss.
-  - [ ] Offline-friendly: mock OpenAI where required; avoid network in CI.
+  - [x] Unit: verify ordering by cosine score (descending) and score presence in API output.
+  - [x] Unit: chunking splits long input into multiple shards as expected.
+  - [x] Unit: prompt assembly respects `HISTORY_TURNS` and token budget; truncation occurs when needed.
+  - [ ] Migration: ensure Alembic upgrade/downgrade for IVFFlat runs without data loss. (Deferred: covered by container smoke; add focused Alembic test in M3.)
+  - [x] Offline-friendly: mock OpenAI where required; avoid network in CI.
 
 - Docs
-  - [ ] Update `DEV_ENVIRONMENT.md` with new envs and tuning tips (metric, lists, chunk sizes, history, token budget).
-  - [ ] Update `architecture_overview.md` references to explicitly note cosine + IVFFlat and score exposure.
-  - [ ] Add a short `DB_MIGRATIONS.md` note about IVFFlat creation timing and ANALYZE guidance.
+  - [x] Update `DEV_ENVIRONMENT.md` with new envs and tuning tips (metric, lists, chunk sizes, history, token budget).
+  - [x] Update `architecture_overview.md` references to explicitly note cosine + IVFFlat and score exposure.
+  - [x] Add a short `DB_MIGRATIONS.md` note about IVFFlat creation timing and ANALYZE guidance.
 
 ### M3: Schema migrations (extensions)
 - Use existing Alembic setup to add: IVFFlat index operations, `source` and `metadata` (JSONB) on content table(s) as needed.

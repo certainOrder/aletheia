@@ -155,6 +155,7 @@ def semantic_search(
             "semantic_search",
             extra={
                 "limit": limit,
+                "top_k": limit,
                 "user_id": user_id,
                 "result_count": len(results),
                 "metric": metric,
@@ -171,6 +172,16 @@ def semantic_search(
                     "ids": [r.get("id") for r in results],
                 },
             )
+            # Debug-level per-item score visibility
+            for r in results:
+                logger.debug(
+                    "retrieval_item",
+                    extra={
+                        "id": r.get("id"),
+                        "score": r.get("score"),
+                        "content_len": len(r.get("content") or ""),
+                    },
+                )
         except Exception:  # pragma: no cover
             pass
 
@@ -230,9 +241,30 @@ def semantic_search(
             "semantic_search_fallback",
             extra={
                 "limit": limit,
+                "top_k": limit,
                 "user_id": user_id,
                 "result_count": len(results_out),
                 "metric": metric,
             },
         )
+        try:
+            logger.info(
+                "retrieval_scores",
+                extra={
+                    "metric": metric,
+                    "scores": [r.get("score") for r in results_out],
+                    "ids": [r.get("id") for r in results_out],
+                },
+            )
+            for r in results_out:
+                logger.debug(
+                    "retrieval_item",
+                    extra={
+                        "id": r.get("id"),
+                        "score": r.get("score"),
+                        "content_len": len(r.get("content") or ""),
+                    },
+                )
+        except Exception:  # pragma: no cover
+            pass
         return results_out

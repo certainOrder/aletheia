@@ -39,6 +39,12 @@ CHUNK_SIZE: int = int(_chunk_size_str)
 _chunk_overlap_str: str = env("CHUNK_OVERLAP", "100") or "100"
 CHUNK_OVERLAP: int = int(_chunk_overlap_str)
 
+# Conversation history & token budget
+_history_turns_str: str = env("HISTORY_TURNS", "5") or "5"
+HISTORY_TURNS: int = int(_history_turns_str)
+_max_prompt_tokens_str: str = env("MAX_PROMPT_TOKENS", "40000") or "40000"
+MAX_PROMPT_TOKENS: int = int(_max_prompt_tokens_str)
+
 # pgvector IVFFlat tuning
 _ivf_lists_str: str = env("PGVECTOR_IVFFLAT_LISTS", "100") or "100"
 PGVECTOR_IVFFLAT_LISTS: int = int(_ivf_lists_str)

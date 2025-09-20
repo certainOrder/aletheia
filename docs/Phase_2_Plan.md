@@ -64,8 +64,8 @@ Key context updates since initial draft:
   - [x] Log truncation decisions and final prompt token count for observability.
 
 - Observability & logs
-  - [ ] Log search metric used, `top_k`, and include `score` per item in debug logs.
-  - [ ] Add structured events for `index_build`, `analyze`, and `retrieval_scores`.
+  - [x] Log search metric used, `top_k`, and include `score` per item in debug logs.
+  - [x] Add structured events for `index_build`, `analyze`, and `retrieval_scores`.
 
 - Tests
   - [ ] Unit: verify ordering by cosine score (descending) and score presence in API output.

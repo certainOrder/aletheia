@@ -1,3 +1,8 @@
+"""Embedding utilities and simple vector search helpers.
+
+Provides a deterministic local embedding fallback for development and tests.
+"""
+
 import hashlib
 import logging
 import random

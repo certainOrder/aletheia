@@ -14,8 +14,6 @@ repos:
       - id: ruff
         args: ["--fix"]
         files: ^app/
-      - id: ruff-format
-        files: ^app/
   - repo: https://github.com/psf/black
     rev: 24.8.0
     hooks:

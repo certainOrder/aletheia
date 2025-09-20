@@ -5,8 +5,8 @@ def test_root(client):
 
 
 def test_health(client):
-    r = client.get("/health")
-    # health route is included at root (no prefix)
+    r = client.get("/api/health")
+    # health route is mounted under /api
     assert r.status_code == 200
     assert r.json()["status"] == "healthy"
 

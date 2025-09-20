@@ -1,3 +1,9 @@
+"""OpenAI service wrapper with deterministic local fallbacks for development.
+
+Encapsulates chat and simple completion behavior while allowing offline tests
+and smoke checks when `DEV_FALLBACKS=true`.
+"""
+
 import hashlib
 import random
 from typing import Any, cast
@@ -10,11 +16,21 @@ from app.config import DEV_FALLBACKS, OPENAI_API_KEY, OPENAI_CHAT_MODEL
 
 class OpenAIService:
     def __init__(self, api_key: str | None = None):
+        """Initialize the OpenAI service wrapper.
+
+        If no API key is provided and dev fallbacks are enabled, remote calls will be
+        bypassed in favor of deterministic local responses suitable for tests.
+        """
         key = api_key or OPENAI_API_KEY
         self.api_key = key
         self.client = OpenAI(api_key=key) if key else None
 
     def get_response(self, prompt: str, model: str | None = None) -> str:
+        """Return a single-turn assistant response for a given prompt.
+
+        Uses the OpenAI Chat Completions API when available; otherwise falls back
+        to a deterministic local echo-like response in development.
+        """
         try:
             if self.client is None or DEV_FALLBACKS:
                 # Local fallback when no API key provided
@@ -32,6 +48,7 @@ class OpenAIService:
             raise HTTPException(status_code=500, detail=str(e))
 
     def chat(self, messages: list[dict[str, Any]], model: str | None = None):
+        """Send a chat conversation and return the provider response or local fallback."""
         try:
             if self.client is None or DEV_FALLBACKS:
                 return self._local_chat_response(messages, model)
@@ -49,6 +66,7 @@ class OpenAIService:
 
     # --- Local fallback helpers ---
     def _local_response(self, prompt: str) -> str:
+        """Produce a deterministic local response for offline testing."""
         # Extremely simple deterministic echo-like response for dev
         seed = int(hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:8], 16)
         rng = random.Random(seed)
@@ -61,6 +79,7 @@ class OpenAIService:
         return prefixes[rng.randrange(len(prefixes))] + prompt
 
     def _local_chat_response(self, messages: list[dict], model: str | None):
+        """Return a minimal OpenAI-like chat response object for local tests."""
         # Mimic OpenAI ChatCompletion response structure minimally
         last_user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
         content = self._local_response(last_user)

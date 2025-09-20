@@ -1,6 +1,6 @@
 # Aletheia: OpenAI-compatible RAG API (FastAPI + pgvector)
 
-This repository provides a FastAPI service exposing OpenAI-compatible endpoints and a RAG flow backed by PostgreSQL with `pgvector`. It includes a lightweight static chat UI and a Docker Compose dev environment with OpenWebUI.
+This repository provides a FastAPI service exposing OpenAI-compatible endpoints and a RAG flow backed by PostgreSQL with `pgvector`. It includes a Docker Compose dev environment with OpenWebUI.
 
 For local development and smoke test instructions, see `docs/DEV_ENVIRONMENT.md`.
 
@@ -74,6 +74,32 @@ aletheia
 - Smoke tests and detailed dev instructions: see `docs/DEV_ENVIRONMENT.md`.
 - Phase 1 scope: `docs/Implementation_Plan_Phase_1.md`.
 - Phase 2 plan: `docs/Phase_2_Plan.md`.
+
+### Logging and Error Model
+
+- Structured JSON logs with correlation IDs (`X-Request-ID`). If a client provides the header, it is propagated to logs and echoed back in responses; otherwise a UUID is generated.
+- Configure log level via `LOG_LEVEL` env (default `INFO`). Examples: `DEBUG`, `INFO`, `WARNING`.
+- Centralized error responses use a consistent JSON shape:
+
+```json
+{
+   "error": "ValidationError",
+   "detail": [/* details */],
+   "status": 422,
+   "request_id": "abc-123"
+}
+```
+
+Quick example:
+
+```bash
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+   -H 'Content-Type: application/json' \
+   -H 'X-Request-ID: abc-123' \
+   -d '{"messages":[{"role":"user","content":"Hello"}]}' | jq .
+```
+
+In logs you should see JSON entries including `request_id: "abc-123"`.
 
 ## Contributing (dev setup)
 

@@ -1,20 +1,33 @@
+"""FastAPI application entrypoint and top-level routes.
+
+This module wires the API router, CORS, and provides OpenAI-compatible chat endpoints
+and a simple RAG flow. In development, deterministic fallbacks are available to run
+offline tests without external dependencies.
+"""
+
 import os
+from contextlib import asynccontextmanager
 from time import time as _time
 from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.routes import router as api_router
-from app.config import ALLOWED_ORIGINS, OPENAI_CHAT_MODEL
+from app.config import ALLOWED_ORIGINS, LOG_LEVEL, OPENAI_CHAT_MODEL
 from app.db import engine, get_db
 from app.db.models import Base
+from app.error_handlers import (
+    handle_http_exception,
+    handle_unhandled_exception,
+    handle_validation_error,
+)
+from app.logging_utils import RequestIdMiddleware, configure_logging
+from app.schemas import ChatRequest, IndexMemoryRequest, RAGChatRequest
+from app.security import SecurityHeadersMiddleware
 from app.services.openai_service import OpenAIService
 from app.utils.embeddings import (
     convert_to_embedding,
@@ -25,7 +38,26 @@ from app.utils.embeddings import (
 # Load environment variables from .env file at startup
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """App lifespan to initialize database extensions and tables in dev.
+
+    In production deployments, prefer Alembic migrations.
+    """
+    try:
+        # Configure structured logging early
+        configure_logging(LOG_LEVEL)
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        Base.metadata.create_all(bind=engine)
+    except Exception:
+        # Silent failure; prefer Alembic in production
+        pass
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # CORS
 app.add_middleware(
@@ -36,31 +68,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include additional API routes
-app.include_router(api_router)
+# Request ID middleware & basic request logging
+app.add_middleware(RequestIdMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
-# Serve static files (for chat UI)
-app.mount(
-    "/static",
-    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
-    name="static",
-)
-
-
-# Route for chat UI
-@app.get("/chat")
-def chat_ui():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "chat.html"))
-
-
-# Request model for OpenAI chat
-class ChatRequest(BaseModel):
-    prompt: str
+# Include additional API routes under a stable "/api" prefix
+app.include_router(api_router, prefix="/api")
 
 
 # POST endpoint to test OpenAI integration
 @app.post("/openai-chat")
 async def openai_chat(request: ChatRequest):
+    """Invoke the OpenAI service (or fallback) with a simple prompt payload."""
     service = OpenAIService()
     response = service.get_response(request.prompt)
     return {"response": response}
@@ -68,18 +87,13 @@ async def openai_chat(request: ChatRequest):
 
 @app.get("/")
 def read_root():
+    """Basic liveness message for root path."""
     return {"message": "Hello, World!"}
-
-
-# RAG Chat endpoint: embed prompt, search memory_shards, add context, then call OpenAI
-class RAGChatRequest(BaseModel):
-    prompt: str
-    user_id: str | None = None
-    top_k: int = 5
 
 
 @app.post("/rag-chat")
 async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
+    """RAG flow: embed query, retrieve context, and call chat provider (or fallback)."""
     query_vec = convert_to_embedding(req.prompt)
     results = semantic_search(db, query_vec, user_id=req.user_id, limit=req.top_k)
     context_chunks = [r["content"] for r in results]
@@ -102,26 +116,9 @@ async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
     return {"answer": answer, "context": results}
 
 
-@app.on_event("startup")
-def on_startup():
-    # Create tables if they do not exist (dev convenience)
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        Base.metadata.create_all(bind=engine)
-    except Exception:
-        # Silent failure; prefer Alembic in production
-        pass
-
-
-class IndexMemoryRequest(BaseModel):
-    content: str
-    user_id: str | None = None
-    tags: list[str] | None = None
-
-
 @app.post("/index-memory")
 async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
+    """Compute an embedding for content and persist it as a memory shard."""
     emb = convert_to_embedding(req.content)
     shard = save_embedding_to_db(
         db=db, content=req.content, embedding=emb, user_id=req.user_id, tags=req.tags
@@ -132,6 +129,7 @@ async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
 # OpenAI-compatible chat completions endpoint for OpenWebUI
 @app.post("/v1/chat/completions")
 async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
+    """OpenAI-compatible Chat Completions endpoint with optional RAG context injection."""
     # Expecting { model?: str, messages: [{role, content}, ...], stream?: bool }
     messages = payload.get("messages", [])
     model = payload.get("model")
@@ -184,6 +182,7 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
 
 @app.get("/v1/models")
 async def v1_models():
+    """List available models, compatible with OpenAI `/v1/models`."""
     return {
         "object": "list",
         "data": [
@@ -201,3 +200,16 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+
+# Exception handlers (registered after routes/middleware)
+app.add_exception_handler(Exception, handle_unhandled_exception)
+from collections.abc import Awaitable, Callable  # noqa: E402
+from typing import cast  # noqa: E402
+
+from fastapi import HTTPException  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from starlette.responses import Response  # noqa: E402
+
+GenericHandler = Callable[..., Response | Awaitable[Response]]
+app.add_exception_handler(HTTPException, cast(GenericHandler, handle_http_exception))
+app.add_exception_handler(RequestValidationError, cast(GenericHandler, handle_validation_error))

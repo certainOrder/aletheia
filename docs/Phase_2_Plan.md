@@ -87,6 +87,58 @@ Key context updates since initial draft:
   - `alembic upgrade head` bootstraps a fresh DB including new fields/indexes.
   - `alembic downgrade -1` works at least one step without data loss for core tables.
 
+#### M3 Implementation Checklist
+
+- Schema: content metadata & indexing
+  - [ ] Add `source TEXT NULL` to `memory_shards` (optional free-form origin, e.g., url/file)
+  - [ ] Add `metadata JSONB` to `memory_shards` (nullable or default `{}`); store arbitrary key/values
+  - [ ] Add BTree index on `memory_shards.user_id` (if not already present) for scoped queries
+  - [ ] Add GIN index on `memory_shards.metadata` (jsonb_path_ops) for key filtering (optional; doc trade-offs)
+  - [ ] Confirm/retain `embedding` vector index (HNSW/IVFFlat as configured) is unchanged by migration
+
+- New table: raw_conversations
+  - [ ] Create `raw_conversations` with columns:
+    - `id UUID PK`, `created_at TIMESTAMPTZ DEFAULT now()`
+    - `request_id TEXT`, `user_id TEXT NULL`, `provider TEXT`, `model TEXT`
+    - `messages JSONB` (request payload), `response JSONB` (assistant reply + usage)
+    - `status_code INT` (HTTP response code), `latency_ms INT` (optional)
+  - [ ] Indexes: BTree on `(created_at)`, `(user_id)`, and optional `(request_id)`
+
+- Alembic migration(s)
+  - [ ] Create revision `0004_add_source_metadata_and_raw_conversations`
+  - [ ] Upgrade: add columns to `memory_shards`, backfill `metadata` to `{}` where NULL (if default not set)
+  - [ ] Upgrade: create `raw_conversations` table + indexes
+  - [ ] Downgrade: drop indexes, drop `raw_conversations`, drop columns from `memory_shards`
+  - [ ] Ensure idempotence and safety on existing populated DBs (avoid table/column re-creation)
+
+- Ingestion & API propagation
+  - [ ] Extend `IndexMemoryRequest` and `IngestRequest` to accept optional `source` and `metadata: dict[str, Any]`
+  - [ ] Propagate `source`/`metadata` to `save_embedding_to_db`
+  - [ ] Ensure `/ingest` propagates original `tags`, `source`, `metadata` to each chunk
+  - [ ] Expose `source`/`metadata` in retrieval results and `aletheia_context`
+
+- Raw conversations persistence (app layer)
+  - [ ] In `/v1/chat/completions`, insert a `raw_conversations` record containing: request `messages`, selected `model`, provider, `request_id`, response object, status, and duration
+  - [ ] Ensure behavior is offline-friendly with `DEV_FALLBACKS=true` (no network required)
+  - [ ] Add log hooks: `raw_conversations_saved` with `id`, `request_id`
+
+- Tests
+  - [ ] Migration smoke: `alembic upgrade head` and `downgrade -1` roundtrip on temp DB without data loss
+  - [ ] Ingestion propagation: `/index-memory` and `/ingest` persist `source`/`metadata`; retrieval returns them
+  - [ ] API response: `aletheia_context` items include `source`/`metadata` when present
+  - [ ] Raw conversations: invoking `/v1/chat/completions` creates a `raw_conversations` row with expected fields (mock time for latency determinism)
+  - [ ] Offline-friendly: all tests run with `DEV_FALLBACKS=true` and no external calls
+
+- Docs
+  - [ ] `architecture_overview.md`: add `source`/`metadata` fields to memory shard description and note `raw_conversations` persistence
+  - [ ] `DEV_ENVIRONMENT.md`: document new request fields and example payloads
+  - [ ] `DB_MIGRATIONS.md`: add revision notes for `0004`, backfill behavior, and indexes
+
+- Acceptance
+  - [ ] Fresh DB: `alembic upgrade head` includes new columns/table; API starts and tests pass
+  - [ ] Existing DB: migration applies without data loss; downgrades cleanly one step
+  - [ ] `/ingest` and `/index-memory` store & surface `source`/`metadata`; `/v1/chat/completions` logs to `raw_conversations`
+
 ### M4: Tests & CI
 - Unit tests: deterministic fallback; search ordering; provider selection; basic chat response shape.
 - Integration (optional/offline-friendly): mock OpenAI or use deterministic fallbacks; tmp Postgres with `pgvector`; minimal ingest + query.

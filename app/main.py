@@ -334,7 +334,17 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
     query_text = user_messages[-1]["content"] if user_messages else ""
     context_results = []
     if query_text:
-        logger.info("retrieval_begin", extra={"query_len": len(query_text or "")})
+        # Include retrieval settings for observability
+        from app.config import SIMILARITY_METRIC as CONF_METRIC
+
+        logger.info(
+            "retrieval_begin",
+            extra={
+                "query_len": len(query_text or ""),
+                "metric": (CONF_METRIC or "cosine"),
+                "top_k": 5,
+            },
+        )
         qvec = convert_to_embedding(query_text)
         context_results = semantic_search(db, qvec, limit=5)
         context_text = "\n\n---\n\n".join(r["content"] for r in context_results)

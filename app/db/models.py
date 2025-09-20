@@ -1,3 +1,9 @@
+"""SQLAlchemy 2.0 typed ORM models for Aletheia.
+
+Defines `MemoryShard`, which stores content, tags, user association, and a pgvector
+embedding used for semantic search and RAG context retrieval.
+"""
+
 import uuid
 from typing import Optional
 

@@ -1,0 +1,37 @@
+"""Pydantic response schemas for API endpoints."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class IndexMemoryResponse(BaseModel):
+    """Response for `/index-memory`."""
+
+    id: str = Field(..., description="UUID of the created memory shard")
+
+
+class RetrievedContextItem(BaseModel):
+    id: str
+    content: str
+    user_id: str | None = None
+    tags: list[str] | None = None
+    distance: float | None = None
+
+
+class RAGChatResponse(BaseModel):
+    """Response for `/rag-chat` containing answer and retrieval context."""
+
+    answer: str
+    context: list[RetrievedContextItem]
+
+
+class ErrorResponse(BaseModel):
+    """Standard error envelope returned by exception handlers."""
+
+    error: str
+    detail: Any
+    status: int
+    request_id: str

@@ -78,6 +78,29 @@ curl -s -X POST http://localhost:8000/v1/chat/completions \
 
 If `DEV_FALLBACKS=true`, responses are generated locally; otherwise, real OpenAI calls are made (requires `OPENAI_API_KEY`).
 
+---
+
+## Observability & Logs
+
+Use the API container logs to trace the full flow (request → embed → retrieval → OpenAI → response).
+
+Tail logs:
+
+```bash
+docker compose logs -f aletheia-api
+```
+
+Key log events (JSON formatted):
+- `http_request` — request/response line with `method`, `path`, `status_code`, `duration_ms`, `request_id`.
+- `route_v1_chat_completions` — OpenAI-compatible chat entry with `messages_count`, `model`.
+- `retrieval_begin` — when retrieval is triggered with `query_len`.
+- `embed_request` / `embed_result` — embedding provider and dimension (no content logged).
+- `semantic_search` — retrieval stats: `limit`, `user_id`, `result_count`.
+- `chat_request` / `chat_result` — provider used and result choice count.
+- `completion_result` — final completion with `model`, `content_len`, `context_count`.
+
+Each log line includes a `request_id` header for correlation. The response also returns `X-Request-ID`.
+
 ## Run directly on host (advanced)
 
 1) Ensure Postgres with pgvector is available locally and `DATABASE_URL` points to it.
@@ -135,3 +158,27 @@ If the key is missing/invalid while `DEV_FALLBACKS=false`, you should see a clea
 
 - Dev fallbacks are meant for local usage only. Consider guarding these behind `DEV_FALLBACKS=false` in production deployments.
 - Current similarity metric is L2 distance. Consider adding cosine distance and IVFFlat index for scale.
+
+## Logging and Error Model (dev)
+
+- Structured JSON logs are emitted to stdout. Control verbosity via `LOG_LEVEL` (e.g., `DEBUG`, `INFO`).
+- Correlation IDs: set `X-Request-ID` in requests to propagate that value to logs and responses; otherwise a UUID is generated.
+- Error responses are consistent:
+
+```json
+{
+  "error": "InternalServerError",
+  "detail": "An unexpected error occurred.",
+  "status": 500,
+  "request_id": "dev-trace-1"
+}
+```
+
+Try it:
+
+```bash
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'X-Request-ID: dev-trace-1' \
+  -d '{"messages":[]}' | jq .
+```

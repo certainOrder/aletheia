@@ -44,3 +44,6 @@ DEV_FALLBACKS: bool = (env("DEV_FALLBACKS", "false") or "false").lower() in {
     "yes",
     "on",
 }
+
+# Logging
+LOG_LEVEL: str = env("LOG_LEVEL", "INFO") or "INFO"

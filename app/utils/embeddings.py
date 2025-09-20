@@ -1,3 +1,8 @@
+"""Embedding utilities and simple vector search helpers.
+
+Provides a deterministic local embedding fallback for development and tests.
+"""
+
 import hashlib
 import logging
 import random
@@ -9,6 +14,8 @@ from sqlalchemy.orm import Session
 from app.config import DEV_FALLBACKS, EMBEDDING_DIM, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL
 from app.db.models import MemoryShard
 
+logger = logging.getLogger("app.flow")
+
 
 def convert_to_embedding(text_input: str) -> list[float]:
     """
@@ -17,6 +24,15 @@ def convert_to_embedding(text_input: str) -> list[float]:
     development smoke tests can proceed without a real key.
     """
     try:
+        logger.info(
+            "embed_request",
+            extra={
+                "text_len": len(text_input or ""),
+                "provider": (
+                    "openai" if (not DEV_FALLBACKS and OPENAI_API_KEY) else "local_fallback"
+                ),
+            },
+        )
         if not DEV_FALLBACKS:
             client = OpenAI(api_key=OPENAI_API_KEY)
             # The OpenAI SDK types model as a Literal of known models; our config is a str.
@@ -24,7 +40,9 @@ def convert_to_embedding(text_input: str) -> list[float]:
             result = client.embeddings.create(
                 model=cast(Any, OPENAI_EMBEDDING_MODEL), input=text_input
             )
-            return result.data[0].embedding  # list[float]
+            emb = result.data[0].embedding  # list[float]
+            logger.info("embed_result", extra={"dim": len(emb), "provider": "openai"})
+            return emb
         else:
             raise RuntimeError("DEV_FALLBACKS enabled")
     except Exception as e:  # fallback for local/dev without keys
@@ -38,7 +56,9 @@ def convert_to_embedding(text_input: str) -> list[float]:
         seed = int(h[:16], 16)
         rng = random.Random(seed)
         # Generate EMBEDDING_DIM floats in [-1.0, 1.0]
-        return [rng.uniform(-1.0, 1.0) for _ in range(EMBEDDING_DIM)]
+        emb = [rng.uniform(-1.0, 1.0) for _ in range(EMBEDDING_DIM)]
+        logger.info("embed_result", extra={"dim": len(emb), "provider": "local_fallback"})
+        return emb
 
 
 def save_embedding_to_db(
@@ -58,6 +78,14 @@ def save_embedding_to_db(
     db.add(shard)
     db.commit()
     db.refresh(shard)
+    logger.info(
+        "embedding_saved",
+        extra={
+            "shard_id": str(shard.id),
+            "content_len": len(content or ""),
+            "tags_count": len(tags or []),
+        },
+    )
     return shard
 
 
@@ -69,6 +97,10 @@ def semantic_search(
         q = q.filter(MemoryShard.user_id == user_id)
     q = q.order_by(MemoryShard.embedding.l2_distance(query_embedding)).limit(limit)
     rows = q.all()
+    logger.info(
+        "semantic_search",
+        extra={"limit": limit, "user_id": user_id, "result_count": len(rows)},
+    )
     return [
         {
             "id": str(r.id),

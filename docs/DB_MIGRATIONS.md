@@ -52,6 +52,10 @@ in `.env` and reflect it in new migrations if needed.
 - Migration `0003` creates an IVFFlat index on `memory_shards.embedding` using the cosine opclass.
 - Creation is gated by `PGVECTOR_ENABLE_IVFFLAT` (default `true`). The number of lists is controlled by `PGVECTOR_IVFFLAT_LISTS` (default `100`).
 - After creating the index or a significant ingest, run `ANALYZE` to ensure good query plans:
+Tuning notes
+- Consider deferring IVFFlat creation until after initial bulk ingest to reduce build time; toggle via `PGVECTOR_ENABLE_IVFFLAT`.
+- Select `PGVECTOR_IVFFLAT_LISTS` based on corpus size: start at 100–200 for small sets; increase (e.g., 512–2048) for larger corpora to improve recall.
+- Always `ANALYZE` after big ingests or index builds to update statistics.
 
 ```bash
 docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ANALYZE memory_shards"

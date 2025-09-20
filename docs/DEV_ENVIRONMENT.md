@@ -21,7 +21,7 @@ Copy `.env.example` to `.env` and adjust as needed.
 - `EMBEDDING_DIM`: Defaults to `1536` and must match the DB vector column dim.
 - `ALLOWED_ORIGINS`: Comma-separated list for CORS.
 - `DEV_FALLBACKS`: When `true`, the API uses deterministic local fallbacks for embeddings and chat so you can develop without an OpenAI key. Defaults to `false` in `.env.example`; set to `true` for local Docker runs in `.env`.
-- `SIMILARITY_METRIC`: Retrieval metric; defaults to `cosine`.
+ - `SIMILARITY_METRIC`: Retrieval metric; defaults to `cosine` (recommended for OpenAI embeddings).
 - `CHUNK_SIZE`: Maximum characters per chunk during ingestion; defaults to `800`.
 - `CHUNK_OVERLAP`: Overlapping characters between consecutive chunks; defaults to `100`.
  - `HISTORY_TURNS`: Number of recent user turns to retain when assembling prompts; defaults to `5`.
@@ -181,7 +181,7 @@ If the key is missing/invalid while `DEV_FALLBACKS=false`, you should see a clea
 ## Notes
 
 - Dev fallbacks are meant for local usage only. Consider guarding these behind `DEV_FALLBACKS=false` in production deployments.
-- Current similarity metric is L2 distance. Consider adding cosine distance and IVFFlat index for scale.
+- Retrieval uses cosine similarity by default and surfaces scores in API responses (`aletheia_context`). IVFFlat indexing is available and gated by env.
 
 ## Logging and Error Model (dev)
 

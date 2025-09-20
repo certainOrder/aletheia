@@ -1,6 +1,6 @@
 # 🧠 Aletheia Phase 1 RAG Architecture Overview
 
-**Last updated:** 2025-09-19
+**Last updated:** 2025-09-20
 **Target audience:** Engineers integrating or extending the RAG pipeline
 
 ---
@@ -15,7 +15,7 @@ OpenWebUI (frontend)
 FastAPI OpenAI-compatible endpoint (/v1/chat/completions)
    ↓
 → Generate embedding (text-embedding-3-small)
-→ Query Postgres/pgvector (memory_shards) for nearest context
+→ Query Postgres/pgvector (memory_shards) for nearest context (cosine similarity; IVFFlat optional)
 → Inject retrieved context into prompt
 → Include prior 5 user/assistant turns (if available)
    ↓
@@ -44,7 +44,7 @@ Log raw_conversations (request/response metadata)
   - `POST /v1/chat/completions`: Core endpoint for chat.
     - Extracts user message.
     - Embeds it via OpenAI embedding model.
-    - Searches memory_shards using pgvector.
+  - Searches memory_shards using pgvector (cosine similarity), optionally via IVFFlat index for performance.
     - Prepends context + conversation history.
     - Calls OpenAI and returns reply.
 - **Internal Utilities:**
@@ -58,7 +58,7 @@ Log raw_conversations (request/response metadata)
 - **Table:** `memory_shards`
   - `id`, `user_id`, `content`, `embedding`, `tags`
 - Embeddings are 1536-dimensional vectors (OpenAI default).
-- Search returns top-k similar context chunks using pgvector.
+- Search returns top-k similar context chunks using pgvector. Scores are computed (cosine-based) and surfaced back to clients in `aletheia_context`.
 - Also logs chat history to `raw_conversations`.
 
 ### 🔹 OpenAI API (External)
@@ -88,7 +88,7 @@ Log raw_conversations (request/response metadata)
 ## 🪛 Developer Notes
 - CORS is enabled for local development (e.g. OpenWebUI).
 - Config values loaded from `.env`: model names, API keys, DB URL.
-- Embedding distance defaults to L2 but cosine is supported.
+- Retrieval metric defaults to cosine similarity (recommended for OpenAI embeddings). IVFFlat index on `embedding` column can be enabled via env to improve top-k performance.
 - `.env.example` included for onboarding new developers.
 - All context injection is done server-side; OpenWebUI stays unchanged.
 - Future phases will support streaming and finer control.
@@ -158,6 +158,18 @@ graph TD;
     F --> G[Response Parsed + Displayed];
     G --> H1[raw_conversations];
     G --> H2[memory_shards];
+```
+
+### Retrieval stage badge (cosine + IVFFlat)
+
+```mermaid
+graph LR;
+  Q[Query Embedding] --> R[Retrieval (pgvector)];
+  R --> Ctx[Top-k Context];
+  RBadge((cosine + IVFFlat));
+  R -.-> RBadge;
+  class RBadge badge;
+  classDef badge fill:#e7f0ff,stroke:#4c6fff,stroke-width:1px,color:#1f3b8f,rx:8,ry:8;
 ```
 
 ---

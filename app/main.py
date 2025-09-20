@@ -274,8 +274,63 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
         "route_v1_chat_completions",
         extra={"messages_count": len(messages or []), "model": model or OPENAI_CHAT_MODEL},
     )
+    # Read dynamic config for history/budget to support test overrides
+    from app.config import HISTORY_TURNS as DEFAULT_HISTORY_TURNS
+    from app.config import MAX_PROMPT_TOKENS as DEFAULT_MAX_PROMPT_TOKENS
+    from app.config import env as _env
+
+    _history_turns = int(
+        _env("HISTORY_TURNS", str(DEFAULT_HISTORY_TURNS)) or str(DEFAULT_HISTORY_TURNS)
+    )
+    _max_prompt_tokens = int(
+        _env("MAX_PROMPT_TOKENS", str(DEFAULT_MAX_PROMPT_TOKENS)) or str(DEFAULT_MAX_PROMPT_TOKENS)
+    )
+
+    # Helper: select last N user "turns" (counted by user messages),
+    # including any assistant replies between them
+    def _select_recent_turns(all_msgs: list[dict], n_users: int) -> list[dict]:
+        selected: list[dict] = []
+        count_users = 0
+        for m in reversed(all_msgs):
+            role = m.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            selected.append(m)
+            if role == "user":
+                count_users += 1
+                if count_users >= n_users:
+                    break
+        selected.reverse()
+        return selected
+
+    # Helper: approximate token count by characters/4 (rough heuristic)
+    def _approx_tokens(msgs: list[dict]) -> int:
+        total_chars = 0
+        for m in msgs:
+            c = m.get("content")
+            if isinstance(c, str):
+                total_chars += len(c)
+            else:
+                # For non-string content (function/tool calls), ignore for now
+                continue
+        return (total_chars + 3) // 4
+
+    # Trim incoming history to last N turns prior to retrieval/context assembly
+    trimmed_history = _select_recent_turns(messages, max(_history_turns, 0))
+    dropped_count = len([m for m in messages if m.get("role") in ("user", "assistant")]) - len(
+        trimmed_history
+    )
+    if dropped_count > 0:
+        logger.info(
+            "history_trim",
+            extra={
+                "requested_turns": _history_turns,
+                "dropped_messages": dropped_count,
+                "retained_messages": len(trimmed_history),
+            },
+        )
     # Heuristic: use last user message as query for retrieval
-    user_messages = [m for m in messages if m.get("role") == "user" and m.get("content")]
+    user_messages = [m for m in trimmed_history if m.get("role") == "user" and m.get("content")]
     query_text = user_messages[-1]["content"] if user_messages else ""
     context_results = []
     if query_text:
@@ -288,13 +343,120 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
             "You are a helpful assistant. Use the provided context if relevant. "
             "Cite facts from context explicitly. If context is empty, answer normally."
         )
-        messages = [
+        # Build assembled messages: our system + context wrapper + trimmed history
+        assembled_messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Context:\n{context_text}"},
-        ] + messages
+        ] + trimmed_history
+    else:
+        # No query text; just carry trimmed history and a default system prompt
+        context_text = ""
+        context_results = []
+        system_prompt = "You are a helpful assistant. Answer concisely and helpfully."
+        assembled_messages = [{"role": "system", "content": system_prompt}] + trimmed_history
+
+    # Enforce token budget by dropping oldest history first (preserve system + context + last user)
+    pre_tokens = _approx_tokens(assembled_messages)
+    history_start_index = (
+        2 if context_text != "" else 1
+    )  # system + optional context occupy the head
+
+    # Identify indices of removable messages (history only)
+    def _count_user_msgs(msgs: list[dict]) -> int:
+        return sum(1 for m in msgs if m.get("role") == "user")
+
+    # Ensure we preserve at least one user message (the last one)
+    while pre_tokens > _max_prompt_tokens and (history_start_index < len(assembled_messages)):
+        # If removing next history message would remove the last remaining user, stop
+        remaining_history = assembled_messages[history_start_index:]
+        if _count_user_msgs(remaining_history) <= 1:
+            break
+        # Drop the oldest history message
+        dropped = assembled_messages.pop(history_start_index)
+        logger.debug(
+            "token_budget_drop_history",
+            extra={
+                "dropped_role": dropped.get("role"),
+                "dropped_chars": len(dropped.get("content") or ""),
+            },
+        )
+        pre_tokens = _approx_tokens(assembled_messages)
+
+    # If still over budget, trim the context text content
+    if pre_tokens > _max_prompt_tokens and context_text:
+        # Compute non-context tokens
+        non_context = (
+            assembled_messages[:history_start_index] + assembled_messages[history_start_index + 1 :]
+        )
+        non_ctx_tokens = _approx_tokens(non_context)
+        # Available tokens for context message
+        available_for_context = max(_max_prompt_tokens - non_ctx_tokens, 0)
+        # Convert tokens to approx chars then clamp content
+        allowed_chars = max(available_for_context * 4, 0)
+        original_ctx = assembled_messages[1]["content"]  # the "Context:\n..." message
+        if len(original_ctx) > allowed_chars:
+            new_ctx = original_ctx[:allowed_chars].rstrip()
+            assembled_messages[1]["content"] = new_ctx
+            logger.info(
+                "token_budget_trim_context",
+                extra={
+                    "original_chars": len(original_ctx),
+                    "trimmed_chars": len(new_ctx),
+                    "max_tokens": _max_prompt_tokens,
+                },
+            )
+        # If still over budget, trim the last user message content to fit
+        post_tokens = _approx_tokens(assembled_messages)
+        if post_tokens > _max_prompt_tokens:
+            # Find last user message index
+            last_user_idx = None
+            for i in range(len(assembled_messages) - 1, -1, -1):
+                if assembled_messages[i].get("role") == "user":
+                    last_user_idx = i
+                    break
+            if last_user_idx is not None:
+                other_msgs = (
+                    assembled_messages[:last_user_idx] + assembled_messages[last_user_idx + 1 :]
+                )
+                other_tokens = _approx_tokens(other_msgs)
+                allowed_for_user = max(_max_prompt_tokens - other_tokens, 0)
+                allowed_chars = max(allowed_for_user * 4, 0)
+                user_content = assembled_messages[last_user_idx].get("content") or ""
+                if isinstance(user_content, str) and len(user_content) > allowed_chars:
+                    new_user = user_content[:allowed_chars].rstrip()
+                    assembled_messages[last_user_idx]["content"] = new_user
+                    logger.info(
+                        "token_budget_trim_last_user",
+                        extra={
+                            "original_chars": len(user_content),
+                            "trimmed_chars": len(new_user),
+                            "max_tokens": _max_prompt_tokens,
+                        },
+                    )
+                    post_tokens = _approx_tokens(assembled_messages)
+
+    post_tokens = _approx_tokens(assembled_messages)
+    if post_tokens > _max_prompt_tokens:
+        logger.info(
+            "token_budget_enforced",
+            extra={
+                "pre_tokens": pre_tokens,
+                "post_tokens": post_tokens,
+                "max_tokens": _max_prompt_tokens,
+            },
+        )
+    else:
+        logger.info(
+            "token_budget_enforced",
+            extra={
+                "pre_tokens": pre_tokens,
+                "post_tokens": post_tokens,
+                "max_tokens": _max_prompt_tokens,
+            },
+        )
 
     service = OpenAIService()
-    resp = service.chat(messages, model=model)
+    resp = service.chat(assembled_messages, model=model)
     # Support dict fallback and SDK response shape
     if isinstance(resp, dict):
         content = resp["choices"][0]["message"]["content"]
@@ -324,7 +486,12 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
                 "finish_reason": "stop",
             }
         ],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        # Approximate usage; for observability only
+        "usage": {
+            "prompt_tokens": post_tokens,
+            "completion_tokens": (len(content or "") + 3) // 4,
+            "total_tokens": post_tokens + ((len(content or "") + 3) // 4),
+        },
         "aletheia_context": context_results,
     }
     return out

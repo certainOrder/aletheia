@@ -8,6 +8,8 @@ For the Phase 1 scope, milestones, and acceptance criteria, see `docs/Implementa
 
 For Phase 2 (“real model” testing, reliability, and UX), see `docs/Phase_2_Plan.md`.
 
+For contribution guidance tailored for AI assistants (and humans), see `.github/copilot-instructions.md`.
+
 ## Project Structure
 
 ```

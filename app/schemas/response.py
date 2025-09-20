@@ -24,6 +24,11 @@ class RetrievedContextItem(BaseModel):
     content: str
     user_id: str | None = None
     tags: list[str] | None = None
+    # New in M3: richer retrieval metadata
+    score: float | None = None
+    source: str | None = None
+    metadata: dict | None = None
+    # Back-compat: previously used 'distance'; keep optional for older clients
     distance: float | None = None
 
 

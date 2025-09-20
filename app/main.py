@@ -217,7 +217,13 @@ async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
     )
     emb = convert_to_embedding(req.content)
     shard = save_embedding_to_db(
-        db=db, content=req.content, embedding=emb, user_id=req.user_id, tags=req.tags
+        db=db,
+        content=req.content,
+        embedding=emb,
+        user_id=req.user_id,
+        tags=req.tags,
+        source=req.source,
+        metadata=req.metadata,
     )
     logger.info("route_index_memory_result", extra={"shard_id": str(shard.id)})
     return {"id": str(shard.id)}
@@ -255,7 +261,13 @@ async def ingest(req: IngestRequest, db: Session = Depends(get_db)):
     for ch in chunks:
         emb = convert_to_embedding(ch)
         shard = save_embedding_to_db(
-            db=db, content=ch, embedding=emb, user_id=req.user_id, tags=req.tags
+            db=db,
+            content=ch,
+            embedding=emb,
+            user_id=req.user_id,
+            tags=req.tags,
+            source=req.source,
+            metadata=req.metadata,
         )
         ids.append(str(shard.id))
     logger.info("route_ingest_result", extra={"chunk_count": len(ids)})

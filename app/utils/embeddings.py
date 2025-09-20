@@ -76,12 +76,16 @@ def save_embedding_to_db(
     embedding: list[float],
     user_id: Optional[str] = None,
     tags: Optional[list[str]] = None,
+    source: Optional[str] = None,
+    metadata: Optional[dict] = None,
 ):
     shard = MemoryShard(
         content=content,
         embedding=embedding,
         user_id=user_id,
         tags=tags,
+        source=source,
+        metadata_json=metadata,
     )
     db.add(shard)
     db.commit()
@@ -92,6 +96,8 @@ def save_embedding_to_db(
             "shard_id": str(shard.id),
             "content_len": len(content or ""),
             "tags_count": len(tags or []),
+            "has_source": bool(source),
+            "metadata_keys": list((metadata or {}).keys()),
         },
     )
     return shard
@@ -147,6 +153,8 @@ def semantic_search(
                     "content": shard.content,
                     "user_id": str(shard.user_id) if shard.user_id else None,
                     "tags": shard.tags,
+                    "source": shard.source,
+                    "metadata": shard.metadata_json,
                     "score": s,
                 }
             )
@@ -233,6 +241,8 @@ def semantic_search(
                     "content": shard.content,
                     "user_id": str(shard.user_id) if shard.user_id else None,
                     "tags": shard.tags,
+                    "source": shard.source,
+                    "metadata": shard.metadata_json,
                     "score": sc,
                 }
             )

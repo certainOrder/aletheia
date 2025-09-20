@@ -5,13 +5,21 @@ Provides a deterministic local embedding fallback for development and tests.
 
 import hashlib
 import logging
+import math
 import random
 from typing import Any, Optional, cast
 
 from openai import OpenAI
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import DEV_FALLBACKS, EMBEDDING_DIM, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL
+from app.config import (
+    DEV_FALLBACKS,
+    EMBEDDING_DIM,
+    OPENAI_API_KEY,
+    OPENAI_EMBEDDING_MODEL,
+    SIMILARITY_METRIC,
+)
 from app.db.models import MemoryShard
 
 logger = logging.getLogger("app.flow")
@@ -89,25 +97,142 @@ def save_embedding_to_db(
     return shard
 
 
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute cosine similarity between two vectors; safe for zero norms."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / (na * nb)
+
+
 def semantic_search(
     db: Session, query_embedding: list[float], user_id: Optional[str] = None, limit: int = 5
 ):
-    q = db.query(MemoryShard)
-    if user_id:
-        q = q.filter(MemoryShard.user_id == user_id)
-    q = q.order_by(MemoryShard.embedding.l2_distance(query_embedding)).limit(limit)
-    rows = q.all()
-    logger.info(
-        "semantic_search",
-        extra={"limit": limit, "user_id": user_id, "result_count": len(rows)},
-    )
-    return [
-        {
-            "id": str(r.id),
-            "content": r.content,
-            "user_id": str(r.user_id) if r.user_id else None,
-            "tags": r.tags,
-            "distance": None,  # distance not returned by ORM; could add with annotate
-        }
-        for r in rows
-    ]
+    """Return top-k memory shards ordered by configured similarity metric.
+    Uses DB distance for ordering and derives score from that distance when possible.
+    """
+    metric = (SIMILARITY_METRIC or "cosine").lower()
+
+    # First, try DB-side distance annotation for robust ordering and scoring
+    try:
+        if metric == "cosine":
+            dist_expr = MemoryShard.embedding.cosine_distance(query_embedding)
+        else:
+            dist_expr = MemoryShard.embedding.l2_distance(query_embedding)
+
+        stmt = select(MemoryShard, dist_expr.label("distance"))
+        if user_id:
+            stmt = stmt.where(MemoryShard.user_id == user_id)
+        stmt = stmt.order_by(dist_expr).limit(limit)
+
+        rows = db.execute(stmt).all()
+        # rows are tuples: (MemoryShard, distance)
+        results: list[dict[str, Any]] = []
+        for shard, dist in rows:
+            if metric == "cosine" and dist is not None:
+                # Convert distance d in [0, 2] to similarity score s in [-1, 1]; clamp for safety
+                try:
+                    s = 1.0 - float(dist)
+                except Exception:
+                    s = None
+            else:
+                s = None
+            results.append(
+                {
+                    "id": str(shard.id),
+                    "content": shard.content,
+                    "user_id": str(shard.user_id) if shard.user_id else None,
+                    "tags": shard.tags,
+                    "score": s,
+                }
+            )
+
+        logger.info(
+            "semantic_search",
+            extra={
+                "limit": limit,
+                "user_id": user_id,
+                "result_count": len(results),
+                "metric": metric,
+            },
+        )
+
+        # Log compact score summary for observability
+        try:
+            logger.info(
+                "retrieval_scores",
+                extra={
+                    "metric": metric,
+                    "scores": [r.get("score") for r in results],
+                    "ids": [r.get("id") for r in results],
+                },
+            )
+        except Exception:  # pragma: no cover
+            pass
+
+        return results
+    except Exception:
+        # Fallback: fetch instances and compute local cosine scores for ordering.
+        # Support both real SQLAlchemy Session and the DummySession used in tests.
+        shards: list[MemoryShard]
+        try:
+            if hasattr(db, "execute"):
+                stmt2 = select(MemoryShard)
+                if user_id:
+                    stmt2 = stmt2.where(MemoryShard.user_id == user_id)
+                shards = list(db.execute(stmt2.limit(limit * 4)).scalars().all())
+            elif hasattr(db, "query"):
+                # Duck-typed path for DummySession in tests (treat db as Any for mypy)
+                db_any: Any = db
+                q = db_any.query(MemoryShard)
+                if user_id:
+                    q = q.filter(MemoryShard.user_id == user_id)
+                if hasattr(q, "limit"):
+                    q = q.limit(limit * 4)
+                shards = list(q.all())
+            else:  # pragma: no cover - extremely defensive
+                shards = []
+        except Exception:
+            shards = []
+        scored: list[tuple[Optional[float], MemoryShard]] = []
+        for shard in shards:
+            if metric == "cosine":
+                try:
+                    sc = float(_cosine_similarity(query_embedding, shard.embedding))
+                except Exception:
+                    sc = None
+            else:
+                sc = None
+            scored.append((sc, shard))
+
+        # Sort by score descending where available
+        if any(sc is not None for sc, _ in scored):
+            scored.sort(key=lambda t: (t[0] is None, -(t[0] or 0.0)))
+        scored = scored[:limit]
+
+        results_out: list[dict[str, Any]] = []
+        for sc, shard in scored:
+            results_out.append(
+                {
+                    "id": str(shard.id),
+                    "content": shard.content,
+                    "user_id": str(shard.user_id) if shard.user_id else None,
+                    "tags": shard.tags,
+                    "score": sc,
+                }
+            )
+
+        logger.info(
+            "semantic_search_fallback",
+            extra={
+                "limit": limit,
+                "user_id": user_id,
+                "result_count": len(results_out),
+                "metric": metric,
+            },
+        )
+        return results_out

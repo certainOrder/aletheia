@@ -40,16 +40,16 @@ Key context updates since initial draft:
 #### M2 Implementation Checklist
 
 - Retrieval metric and scores
-  - [ ] Add `SIMILARITY_METRIC=cosine` to config with default `cosine`.
-  - [ ] Update `semantic_search` to use cosine distance for ordering (`pgvector` cosine).
-  - [ ] Include `score` in each returned context item and in logs; document score semantics.
-  - [ ] Expose scores in `/v1/chat/completions` response under `aletheia_context`.
+  - [x] Add `SIMILARITY_METRIC=cosine` to config with default `cosine`.
+  - [x] Update `semantic_search` to use cosine distance for ordering (`pgvector` cosine).
+  - [x] Include `score` in each returned context item and in logs; document score semantics.
+  - [x] Expose scores in `/v1/chat/completions` response under `aletheia_context`.
 
 - IVFFlat index for performance
-  - [ ] Add `PGVECTOR_IVFFLAT_LISTS` to config (default 100) and doc trade-offs.
-  - [ ] Create Alembic migration to add IVFFlat index on `memory_shards.embedding` (cosine opclass).
-  - [ ] Optionally gate index creation behind an env toggle to defer building on empty DBs.
-  - [ ] Add a small script or docs snippet to `ANALYZE` after index creation.
+  - [x] Add `PGVECTOR_IVFFLAT_LISTS` to config (default 100) and doc trade-offs.
+  - [x] Create Alembic migration `0003` to add IVFFlat index on `memory_shards.embedding` (cosine opclass).
+  - [x] Optionally gate index creation behind an env toggle to defer building on empty DBs (`PGVECTOR_ENABLE_IVFFLAT`).
+  - [x] Add a small script or docs snippet to `ANALYZE` after index creation.
 
 - Chunking & ingestion
   - [ ] Add `CHUNK_SIZE` and `CHUNK_OVERLAP` to config with sensible defaults (e.g., 800/100).

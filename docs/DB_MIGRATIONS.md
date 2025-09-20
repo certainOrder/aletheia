@@ -47,6 +47,16 @@ in `.env` and reflect it in new migrations if needed.
   calls it in dev for convenience.
 - Keep migrations deterministic and reversible. Avoid data-dependent logic in migrations.
 
+### IVFFlat index (pgvector)
+
+- Migration `0003` creates an IVFFlat index on `memory_shards.embedding` using the cosine opclass.
+- Creation is gated by `PGVECTOR_ENABLE_IVFFLAT` (default `true`). The number of lists is controlled by `PGVECTOR_IVFFLAT_LISTS` (default `100`).
+- After creating the index or a significant ingest, run `ANALYZE` to ensure good query plans:
+
+```bash
+docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ANALYZE memory_shards"
+```
+
 ## Troubleshooting: existing tables, no Alembic state
 
 If you see errors like `psycopg.errors.DuplicateTable: relation "..." already exists` during

@@ -21,6 +21,9 @@ Copy `.env.example` to `.env` and adjust as needed.
 - `EMBEDDING_DIM`: Defaults to `1536` and must match the DB vector column dim.
 - `ALLOWED_ORIGINS`: Comma-separated list for CORS.
 - `DEV_FALLBACKS`: When `true`, the API uses deterministic local fallbacks for embeddings and chat so you can develop without an OpenAI key. Defaults to `false` in `.env.example`; set to `true` for local Docker runs in `.env`.
+ - `SIMILARITY_METRIC`: Retrieval metric; defaults to `cosine`.
+ - `PGVECTOR_ENABLE_IVFFLAT`: When `true` (default), Alembic migration `0003` creates an IVFFlat index on `memory_shards.embedding` using the cosine opclass.
+ - `PGVECTOR_IVFFLAT_LISTS`: Number of lists for IVFFlat (default `100`). Higher values improve recall at the cost of index size and build time.
 
 ### Recommended `.env` for Docker Compose
 
@@ -77,6 +80,16 @@ curl -s -X POST http://localhost:8000/v1/chat/completions \
 ```
 
 If `DEV_FALLBACKS=true`, responses are generated locally; otherwise, real OpenAI calls are made (requires `OPENAI_API_KEY`).
+
+### IVFFlat tuning and ANALYZE
+
+- The IVFFlat index is created by migration `0003` when `PGVECTOR_ENABLE_IVFFLAT=true`.
+- You can tune the number of lists with `PGVECTOR_IVFFLAT_LISTS` (e.g., 100–2048 depending on corpus size).
+- After index creation or large ingests, run `ANALYZE` to help the planner choose the index:
+
+```bash
+docker compose exec db bash -lc "psql -U $POSTGRES_USER -d $POSTGRES_DB -c 'ANALYZE memory_shards'"
+```
 
 ---
 

@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyd
 *.so
 *.egg
 *.egg-info/
@@ -9,7 +10,6 @@ build/
 
 # Virtual environments
 venv/
-.env/
 .venv/
 ENV/
 
@@ -17,22 +17,33 @@ ENV/
 *.env
 aletheia_api.env
 
+# Never commit real secrets; keep examples like .env.example
+
 # VS Code
 .vscode/
+
+# JetBrains
+.idea/
 
 # OS files
 .DS_Store
 Thumbs.db
+.AppleDouble
+.LSOverride
 
 # Jupyter
 .ipynb_checkpoints/
 
 # Logs
 *.log
+logs/
 
 # Static and cache
 *.sqlite3
 .cache/
+*.cache/
+*.tmp
+tmp/
 
 # Node/npm (if you add frontend tooling)
 node_modules/
@@ -42,3 +53,12 @@ node_modules/
 .coverage.*
 coverage.xml
 htmlcov/
+
+# Test & type caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Docker artifacts
+docker-data/
+*.pid

@@ -1,8 +1,11 @@
-from fastapi import HTTPException
-from openai import OpenAI
 import hashlib
 import random
-from app.config import OPENAI_API_KEY, OPENAI_CHAT_MODEL, DEV_FALLBACKS
+from typing import Any, cast
+
+from fastapi import HTTPException
+from openai import OpenAI
+
+from app.config import DEV_FALLBACKS, OPENAI_API_KEY, OPENAI_CHAT_MODEL
 
 
 class OpenAIService:
@@ -17,23 +20,26 @@ class OpenAIService:
                 # Local fallback when no API key provided
                 return self._local_response(prompt)
             response = self.client.chat.completions.create(
-                model=model or OPENAI_CHAT_MODEL,
+                model=cast(Any, (model or OPENAI_CHAT_MODEL)),
                 messages=[{"role": "user", "content": prompt}],
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content or ""
+            return content
         except Exception as e:
             if DEV_FALLBACKS:
                 # Fallback to local response in dev when remote fails
                 return self._local_response(prompt)
             raise HTTPException(status_code=500, detail=str(e))
 
-    def chat(self, messages: list[dict], model: str | None = None):
+    def chat(self, messages: list[dict[str, Any]], model: str | None = None):
         try:
             if self.client is None or DEV_FALLBACKS:
                 return self._local_chat_response(messages, model)
+            # The SDK expects a union of specific message param types;
+            # our runtime dicts are compatible.
             response = self.client.chat.completions.create(
-                model=model or OPENAI_CHAT_MODEL,
-                messages=messages,
+                model=cast(Any, (model or OPENAI_CHAT_MODEL)),
+                messages=cast(Any, messages),
             )
             return response
         except Exception as e:

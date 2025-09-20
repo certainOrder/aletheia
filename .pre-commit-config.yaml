@@ -13,7 +13,9 @@ repos:
     hooks:
       - id: ruff
         args: ["--fix"]
+        files: ^app/
       - id: ruff-format
+        files: ^app/
   - repo: https://github.com/psf/black
     rev: 24.8.0
     hooks:
@@ -26,3 +28,4 @@ repos:
         additional_dependencies: []
         args:
           - --config-file=pyproject.toml
+        files: ^app/

@@ -36,7 +36,24 @@ typecheck: $(VENV)/bin/activate
 	$(MYPY) .
 
 test: $(VENV)/bin/activate
-	$(PYTEST) -q --cov=.
+	$(PYTEST) -q --cov=app --cov-report=term-missing --cov-fail-under=85
 
 run-api: $(VENV)/bin/activate
 	$(PYTHON) -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# --- Docker Compose helpers ---
+
+.PHONY: compose-up compose-down compose-rebuild compose-logs
+
+compose-up:
+	docker compose --env-file .env up -d --build
+
+compose-down:
+	docker compose down -v
+
+compose-rebuild:
+	docker compose build --no-cache
+	docker compose up -d
+
+compose-logs:
+	docker compose logs -f

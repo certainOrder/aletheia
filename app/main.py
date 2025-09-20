@@ -18,7 +18,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.routes import router as api_router
-from app.config import ALLOWED_ORIGINS, LOG_LEVEL, OPENAI_CHAT_MODEL
+from app.config import (
+    ALLOWED_ORIGINS,
+    DEV_FALLBACKS,
+    LOG_LEVEL,
+    OPENAI_API_KEY,
+    OPENAI_CHAT_MODEL,
+)
 from app.db import engine, get_db
 from app.db.models import Base
 from app.error_handlers import (
@@ -47,6 +53,40 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)),
 logger = logging.getLogger("app.flow")
 
 
+def _ensure_openai_ready() -> None:
+    """Raise a clear HTTP 500 if running without key while fallbacks are disabled.
+
+    Keeps startup permissive for local/dev while enforcing Phase 2 contract at request time.
+    """
+    from fastapi import HTTPException
+
+    # Evaluate from environment at request time to support dynamic config in tests/dev
+    from app.config import env as _env
+
+    _dev_fallbacks = (_env("DEV_FALLBACKS", "false") or "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    _openai_key = _env("OPENAI_API_KEY")
+
+    if not _dev_fallbacks and not _openai_key:
+        msg = (
+            "OpenAI API key is required when DEV_FALLBACKS=false. "
+            "Set OPENAI_API_KEY in your .env (or set DEV_FALLBACKS=true for local dev). "
+            "See docs/DEV_ENVIRONMENT.md#use-real-openai-calls-disable-fallbacks"
+        )
+        logging.getLogger("app").error(
+            "provider_config_error",
+            extra={
+                "detail": "OPENAI_API_KEY missing while fallbacks disabled",
+                "docs_url": "docs/DEV_ENVIRONMENT.md#use-real-openai-calls-disable-fallbacks",
+            },
+        )
+        raise HTTPException(status_code=500, detail=msg)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """App lifespan to initialize database extensions and tables in dev.
@@ -63,6 +103,14 @@ async def lifespan(app: FastAPI):
                 "cors_origins_count": len(ALLOWED_ORIGINS),
             },
         )
+        if not DEV_FALLBACKS and not OPENAI_API_KEY:
+            logging.getLogger("app").warning(
+                "startup_key_missing",
+                extra={
+                    "detail": "OPENAI_API_KEY not set while DEV_FALLBACKS=false",
+                    "docs_url": "docs/DEV_ENVIRONMENT.md#use-real-openai-calls-disable-fallbacks",
+                },
+            )
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         Base.metadata.create_all(bind=engine)
@@ -95,6 +143,7 @@ app.include_router(api_router, prefix="/api")
 @app.post("/openai-chat", tags=["chat"], response_model=dict)
 async def openai_chat(request: ChatRequest):
     """Invoke the OpenAI service (or fallback) with a simple prompt payload."""
+    _ensure_openai_ready()
     logger.info("route_openai_chat", extra={"prompt_len": len(request.prompt or "")})
     service = OpenAIService()
     response = service.get_response(request.prompt)
@@ -114,6 +163,7 @@ def read_root():
 )
 async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
     """RAG flow: embed query, retrieve context, and call chat provider (or fallback)."""
+    _ensure_openai_ready()
     logger.info(
         "route_rag_chat",
         extra={"prompt_len": len(req.prompt or ""), "top_k": req.top_k, "user_id": req.user_id},
@@ -151,6 +201,7 @@ async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
 )
 async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
     """Compute an embedding for content and persist it as a memory shard."""
+    _ensure_openai_ready()
     logger.info(
         "route_index_memory",
         extra={"content_len": len(req.content or ""), "tags_count": len(req.tags or [])},
@@ -167,6 +218,7 @@ async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
 @app.post("/v1/chat/completions", tags=["openai-compat"], response_model=dict)
 async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
     """OpenAI-compatible Chat Completions endpoint with optional RAG context injection."""
+    _ensure_openai_ready()
     # Expecting { model?: str, messages: [{role, content}, ...], stream?: bool }
     messages = payload.get("messages", [])
     model = payload.get("model")

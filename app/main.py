@@ -5,6 +5,7 @@ and a simple RAG flow. In development, deterministic fallbacks are available to 
 offline tests without external dependencies.
 """
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from time import time as _time
@@ -43,6 +44,7 @@ from app.utils.embeddings import (
 
 # Load environment variables from .env file at startup
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+logger = logging.getLogger("app.flow")
 
 
 @asynccontextmanager
@@ -54,6 +56,13 @@ async def lifespan(app: FastAPI):
     try:
         # Configure structured logging early
         configure_logging(LOG_LEVEL)
+        logging.getLogger("app").info(
+            "startup_config",
+            extra={
+                "log_level": LOG_LEVEL,
+                "cors_origins_count": len(ALLOWED_ORIGINS),
+            },
+        )
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         Base.metadata.create_all(bind=engine)
@@ -86,6 +95,7 @@ app.include_router(api_router, prefix="/api")
 @app.post("/openai-chat", tags=["chat"], response_model=dict)
 async def openai_chat(request: ChatRequest):
     """Invoke the OpenAI service (or fallback) with a simple prompt payload."""
+    logger.info("route_openai_chat", extra={"prompt_len": len(request.prompt or "")})
     service = OpenAIService()
     response = service.get_response(request.prompt)
     return {"response": response}
@@ -104,6 +114,10 @@ def read_root():
 )
 async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
     """RAG flow: embed query, retrieve context, and call chat provider (or fallback)."""
+    logger.info(
+        "route_rag_chat",
+        extra={"prompt_len": len(req.prompt or ""), "top_k": req.top_k, "user_id": req.user_id},
+    )
     query_vec = convert_to_embedding(req.prompt)
     results = semantic_search(db, query_vec, user_id=req.user_id, limit=req.top_k)
     context_chunks = [r["content"] for r in results]
@@ -123,6 +137,10 @@ async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
         answer = response["choices"][0]["message"]["content"]
     else:
         answer = response.choices[0].message.content
+    logger.info(
+        "route_rag_result",
+        extra={"context_count": len(results), "answer_len": len(answer or "")},
+    )
     return {"answer": answer, "context": results}
 
 
@@ -133,10 +151,15 @@ async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
 )
 async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
     """Compute an embedding for content and persist it as a memory shard."""
+    logger.info(
+        "route_index_memory",
+        extra={"content_len": len(req.content or ""), "tags_count": len(req.tags or [])},
+    )
     emb = convert_to_embedding(req.content)
     shard = save_embedding_to_db(
         db=db, content=req.content, embedding=emb, user_id=req.user_id, tags=req.tags
     )
+    logger.info("route_index_memory_result", extra={"shard_id": str(shard.id)})
     return {"id": str(shard.id)}
 
 
@@ -147,11 +170,16 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
     # Expecting { model?: str, messages: [{role, content}, ...], stream?: bool }
     messages = payload.get("messages", [])
     model = payload.get("model")
+    logger.info(
+        "route_v1_chat_completions",
+        extra={"messages_count": len(messages or []), "model": model or OPENAI_CHAT_MODEL},
+    )
     # Heuristic: use last user message as query for retrieval
     user_messages = [m for m in messages if m.get("role") == "user" and m.get("content")]
     query_text = user_messages[-1]["content"] if user_messages else ""
     context_results = []
     if query_text:
+        logger.info("retrieval_begin", extra={"query_len": len(query_text or "")})
         qvec = convert_to_embedding(query_text)
         context_results = semantic_search(db, qvec, limit=5)
         context_text = "\n\n---\n\n".join(r["content"] for r in context_results)
@@ -176,6 +204,14 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
         resp_model = resp.model
     completion_id = f"chatcmpl-{uuid4()}"
     created = int(_time())
+    logger.info(
+        "completion_result",
+        extra={
+            "model": resp_model,
+            "content_len": len(content or ""),
+            "context_count": len(context_results),
+        },
+    )
     out = {
         "id": completion_id,
         "object": "chat.completion",

@@ -5,6 +5,7 @@ and smoke checks when `DEV_FALLBACKS=true`.
 """
 
 import hashlib
+import logging
 import random
 from typing import Any, cast
 
@@ -12,6 +13,8 @@ from fastapi import HTTPException
 from openai import OpenAI
 
 from app.config import DEV_FALLBACKS, OPENAI_API_KEY, OPENAI_CHAT_MODEL
+
+logger = logging.getLogger("app.flow")
 
 
 class OpenAIService:
@@ -32,6 +35,16 @@ class OpenAIService:
         to a deterministic local echo-like response in development.
         """
         try:
+            logger.info(
+                "chat_single_request",
+                extra={
+                    "model": model or OPENAI_CHAT_MODEL,
+                    "provider": (
+                        "openai" if (self.client and not DEV_FALLBACKS) else "local_fallback"
+                    ),
+                    "prompt_len": len(prompt or ""),
+                },
+            )
             if self.client is None or DEV_FALLBACKS:
                 # Local fallback when no API key provided
                 return self._local_response(prompt)
@@ -40,6 +53,7 @@ class OpenAIService:
                 messages=[{"role": "user", "content": prompt}],
             )
             content = response.choices[0].message.content or ""
+            logger.info("chat_single_result", extra={"content_len": len(content)})
             return content
         except Exception as e:
             if DEV_FALLBACKS:
@@ -50,6 +64,16 @@ class OpenAIService:
     def chat(self, messages: list[dict[str, Any]], model: str | None = None):
         """Send a chat conversation and return the provider response or local fallback."""
         try:
+            logger.info(
+                "chat_request",
+                extra={
+                    "model": model or OPENAI_CHAT_MODEL,
+                    "provider": (
+                        "openai" if (self.client and not DEV_FALLBACKS) else "local_fallback"
+                    ),
+                    "messages_count": len(messages or []),
+                },
+            )
             if self.client is None or DEV_FALLBACKS:
                 return self._local_chat_response(messages, model)
             # The SDK expects a union of specific message param types;
@@ -58,6 +82,7 @@ class OpenAIService:
                 model=cast(Any, (model or OPENAI_CHAT_MODEL)),
                 messages=cast(Any, messages),
             )
+            logger.info("chat_result", extra={"choices": len(response.choices)})
             return response
         except Exception as e:
             if DEV_FALLBACKS:

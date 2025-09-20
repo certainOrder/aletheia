@@ -47,6 +47,39 @@ class JsonFormatter(logging.Formatter):
             payload["exc_info"] = self.formatException(record.exc_info)
         if record.stack_info:
             payload["stack_info"] = self.formatStack(record.stack_info)
+        # Include any extra fields passed via logging `extra={...}`
+        # while filtering out standard LogRecord attributes.
+        std_attrs = {
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "process",
+            "processName",
+            "message",
+        }
+        for key, value in record.__dict__.items():
+            if key in std_attrs or key.startswith("_") or key in payload:
+                continue
+            try:
+                json.dumps(value)  # probe JSON serializability
+                payload[key] = value
+            except Exception:
+                payload[key] = repr(value)
         return json.dumps(payload, ensure_ascii=False)
 
 

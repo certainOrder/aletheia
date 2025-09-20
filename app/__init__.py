@@ -1,1 +1,1 @@
-# This file initializes the app package and can be used to set up any package-level variables or imports.
+# Package initializer for app. Place package-level setup or imports here if needed.

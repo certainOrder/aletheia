@@ -36,3 +36,9 @@ Thumbs.db
 
 # Node/npm (if you add frontend tooling)
 node_modules/
+
+# Coverage artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

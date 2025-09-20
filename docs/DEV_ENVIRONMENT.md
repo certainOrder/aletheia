@@ -104,6 +104,33 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - 401 from OpenAI: set `DEV_FALLBACKS=true` in `.env` for local development or provide a valid `OPENAI_API_KEY`.
 - No context retrieved in RAG: ensure you indexed content first via `/index-memory`.
 
+## Use real OpenAI calls (disable fallbacks)
+
+By default in local Docker runs, we recommend `DEV_FALLBACKS=true` so you can test without external keys. To exercise real models end-to-end:
+
+1) Set your OpenAI API key in `.env` and disable fallbacks:
+
+```
+OPENAI_API_KEY=sk-...
+DEV_FALLBACKS=false
+```
+
+2) Rebuild and restart (if using Docker Compose):
+
+```bash
+docker compose up -d --build
+```
+
+3) Verify endpoints now use OpenAI:
+
+```bash
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Say hi from a real model."}]}' | jq .
+```
+
+If the key is missing/invalid while `DEV_FALLBACKS=false`, you should see a clear error. Re-enable fallbacks by setting `DEV_FALLBACKS=true` to return to deterministic local behavior.
+
 ## Notes
 
 - Dev fallbacks are meant for local usage only. Consider guarding these behind `DEV_FALLBACKS=false` in production deployments.

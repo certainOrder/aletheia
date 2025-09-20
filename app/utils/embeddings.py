@@ -1,14 +1,16 @@
-from typing import List, Optional
-from openai import OpenAI
 import hashlib
-import random
 import logging
+import random
+from typing import Any, Optional, cast
+
+from openai import OpenAI
 from sqlalchemy.orm import Session
-from app.config import OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL, EMBEDDING_DIM, DEV_FALLBACKS
+
+from app.config import DEV_FALLBACKS, EMBEDDING_DIM, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL
 from app.db.models import MemoryShard
 
 
-def convert_to_embedding(text_input: str) -> List[float]:
+def convert_to_embedding(text_input: str) -> list[float]:
     """
     Convert text to an embedding using OpenAI. If authentication fails or
     OpenAI is unreachable, fall back to a deterministic local embedding so
@@ -17,13 +19,20 @@ def convert_to_embedding(text_input: str) -> List[float]:
     try:
         if not DEV_FALLBACKS:
             client = OpenAI(api_key=OPENAI_API_KEY)
-            result = client.embeddings.create(model=OPENAI_EMBEDDING_MODEL, input=text_input)
+            # The OpenAI SDK types model as a Literal of known models; our config is a str.
+            # Cast to Any here to satisfy mypy while keeping runtime flexibility.
+            result = client.embeddings.create(
+                model=cast(Any, OPENAI_EMBEDDING_MODEL), input=text_input
+            )
             return result.data[0].embedding  # list[float]
         else:
             raise RuntimeError("DEV_FALLBACKS enabled")
     except Exception as e:  # fallback for local/dev without keys
         if not DEV_FALLBACKS:
-            logging.warning("Falling back to local deterministic embedding due to embedding provider error: %s", e)
+            logging.warning(
+                "Falling back to local deterministic embedding due to embedding provider error: %s",
+                e,
+            )
         # Deterministic embedding based on SHA256 of input
         h = hashlib.sha256(text_input.encode("utf-8")).hexdigest()
         seed = int(h[:16], 16)
@@ -36,7 +45,7 @@ def save_embedding_to_db(
     *,
     db: Session,
     content: str,
-    embedding: List[float],
+    embedding: list[float],
     user_id: Optional[str] = None,
     tags: Optional[list[str]] = None,
 ):
@@ -52,7 +61,9 @@ def save_embedding_to_db(
     return shard
 
 
-def semantic_search(db: Session, query_embedding: List[float], user_id: Optional[str] = None, limit: int = 5):
+def semantic_search(
+    db: Session, query_embedding: list[float], user_id: Optional[str] = None, limit: int = 5
+):
     q = db.query(MemoryShard)
     if user_id:
         q = q.filter(MemoryShard.user_id == user_id)

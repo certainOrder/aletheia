@@ -104,10 +104,12 @@ Key context updates since initial draft:
     - `status_code INT` (HTTP response code), `latency_ms INT` (optional)
   - [ ] Indexes: BTree on `(created_at)`, `(user_id)`, and optional `(request_id)`
 
+  Status: Table existed from 0002; augmented in 0005 with `created_at`, `request_id`, `provider`, `model`, `messages`, `response`, `status_code`, and `latency_ms`. Indexes created on `created_at`, `user_id`, and `request_id`.
+
 - Alembic migration(s)
   - [x] Create revision `0004_add_source_metadata_and_raw_conversations` (partial: added source/metadata + indexes; raw_conversations pending)
   - [x] Upgrade: add columns to `memory_shards` (source, metadata), and create indexes (user_id btree, metadata gin)
-  - [ ] Upgrade: create `raw_conversations` table + indexes
+  - [x] Upgrade: create/augment `raw_conversations` with required columns + indexes (via 0005)
   - [x] Downgrade: drop indexes and columns added in this revision
   - [x] Ensure idempotence and safety on existing populated DBs (IF NOT EXISTS guards for indexes)
 
@@ -118,7 +120,7 @@ Key context updates since initial draft:
   - [x] Expose `source`/`metadata` in retrieval results and `aletheia_context`
 
 - Raw conversations persistence (app layer)
-  - [ ] In `/v1/chat/completions`, insert a `raw_conversations` record containing: request `messages`, selected `model`, provider, `request_id`, response object, status, and duration
+  - [x] In `/v1/chat/completions`, insert a `raw_conversations` record containing: request `messages`, selected `model`, provider, `request_id`, response object, status, and duration
   - [ ] Ensure behavior is offline-friendly with `DEV_FALLBACKS=true` (no network required)
   - [ ] Add log hooks: `raw_conversations_saved` with `id`, `request_id`
 
@@ -138,7 +140,7 @@ Key context updates since initial draft:
   - [ ] Fresh DB: `alembic upgrade head` includes new columns/table; API starts and tests pass
   - [ ] Existing DB: migration applies without data loss; downgrades cleanly one step
   - [x] `/ingest` and `/index-memory` store & surface `source`/`metadata`
-  - [ ] `/v1/chat/completions` logs to `raw_conversations`
+  - [x] `/v1/chat/completions` logs to `raw_conversations`
 
 ### M4: Tests & CI
 - Unit tests: deterministic fallback; search ordering; provider selection; basic chat response shape.

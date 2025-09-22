@@ -5,6 +5,7 @@ and a simple RAG flow. In development, deterministic fallbacks are available to 
 offline tests without external dependencies.
 """
 
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -38,7 +39,7 @@ from app.error_handlers import (
     handle_unhandled_exception,
     handle_validation_error,
 )
-from app.logging_utils import RequestIdMiddleware, configure_logging
+from app.logging_utils import RequestIdMiddleware, configure_logging, get_request_id
 from app.schemas import (
     ChatRequest,
     IndexMemoryRequest,
@@ -477,6 +478,8 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
             },
         )
 
+    # Record start time for latency
+    _t0 = _time()
     service = OpenAIService()
     resp = service.chat(assembled_messages, model=model)
     # Support dict fallback and SDK response shape
@@ -516,6 +519,42 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
         },
         "aletheia_context": context_results,
     }
+    # Persist raw conversation log (offline-friendly, no external deps)
+    try:
+        latency_ms = int((_time() - _t0) * 1000)
+        # Determine provider string based on DEV_FALLBACKS
+        provider = "openai" if (not DEV_FALLBACKS and OPENAI_API_KEY) else "local_fallback"
+        # Safely insert into raw_conversations via SQL to avoid adding ORM model for now
+        insert_sql = (
+            "INSERT INTO raw_conversations (id, created_at, request_id, provider, model, "
+            "messages, response, status_code, latency_ms) "
+            "VALUES (:id, now(), :request_id, :provider, :model, :messages, :response, "
+            ":status_code, :latency_ms)"
+        )
+        db.execute(
+            text(insert_sql),
+            {
+                "id": str(uuid4()),
+                "request_id": get_request_id(),
+                "provider": provider,
+                "model": resp_model,
+                "messages": json.dumps(messages),
+                "response": json.dumps(out),
+                "status_code": 200,
+                "latency_ms": latency_ms,
+            },
+        )
+        db.commit()
+        logger.info(
+            "raw_conversations_saved",
+            extra={
+                "request_id": get_request_id(),
+                "latency_ms": latency_ms,
+            },
+        )
+    except Exception as e:
+        # Do not fail the endpoint due to logging persistence issues
+        logger.warning("raw_conversations_save_failed", extra={"error": str(e)})
     return out
 
 

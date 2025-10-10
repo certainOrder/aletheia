@@ -1,11 +1,142 @@
 # Aletheia System Architecture
 
+**Last updated:** 2025-10-10
+**Target audience:** Engineers developing, integrating, or deploying the RAG pipeline
+
+---
+
 ## Overview
-This document describes the containerized deployment architecture for Aletheia and related AI systems, with a focus on the HearthMinds network for AI-to-AI communication.
 
-## Network Architecture
+This document describes the complete Aletheia architecture, covering both:
+- **Development Architecture**: RAG pipeline, API endpoints, database schema, and memory flow
+- **Deployment Architecture**: Containerized setup, multi-AI orchestration, and HearthMinds network for AI-to-AI communication
 
-### Network Layers
+---
+
+## Part I: Development Architecture (RAG System)
+
+### 📌 High-Level Flow (Prompt to Response)
+
+```
+User Message
+   ↓
+OpenWebUI (frontend)
+   ↓
+FastAPI OpenAI-compatible endpoint (/v1/chat/completions)
+   ↓
+→ Generate embedding (text-embedding-3-small)
+→ Query Postgres/pgvector (memory_shards) for nearest context (cosine similarity; IVFFlat optional)
+→ Inject retrieved context into prompt
+→ Include prior 5 user/assistant turns (if available)
+   ↓
+OpenAI Chat Completion (gpt-4o)
+   ↓
+Response parsed and returned to OpenWebUI
+   ↓
+Log raw_conversations (request/response metadata)
+→ (Optional) MemoryShards created from relevant response content
+```
+
+### 🧠 System Components
+
+#### 🔹 OpenWebUI (Frontend)
+- Provides the user interface
+- Forwards user input to backend via OpenAI-compatible endpoints
+- Displays streamed or final completions
+- Does not handle retrieval — that's the backend's job
+- No changes required from user perspective
+
+#### 🔹 FastAPI Backend (RAG Service)
+- Implements a shim between OpenWebUI and OpenAI API with memory-augmented capabilities
+- **Endpoints:**
+  - `GET /v1/models`: Returns supported model (e.g., gpt-4o)
+  - `POST /v1/chat/completions`: Core endpoint for chat
+    - Extracts user message
+    - Embeds it via OpenAI embedding model
+    - Searches memory_shards using pgvector (cosine similarity), optionally via IVFFlat index for performance
+    - Prepends context + conversation history
+    - Calls OpenAI and returns reply
+- **Internal Utilities:**
+  - Embedding generation
+  - Semantic search (cosine or L2)
+  - Prompt construction with retrieved context
+  - Optional debug info injection
+
+#### 🔹 Postgres + pgvector (Memory Storage)
+- Stores vectorized memory as context
+- **Table: `memory_shards`**
+  - `id`, `user_id`, `content`, `embedding`, `tags`
+  - `source` (TEXT, nullable): Optional free-form origin (e.g., URL, file path, "wikipedia")
+  - `metadata` (JSONB, nullable): Flexible key-values (e.g., `{"topic": "health", "verified": true}`)
+- Embeddings are 1536-dimensional vectors (OpenAI default)
+- Search returns top-k similar context chunks using pgvector
+- Scores are computed (cosine-based) and surfaced back to clients in `aletheia_context`
+
+- **Table: `raw_conversations`**
+  - `id`, `created_at`, `request_id`, `user_id`, `provider`, `model`
+  - `messages` (JSONB), `response` (JSONB), `status_code`, `latency_ms`
+  - Logs every chat request/response for observability and replay
+  - Indexed on `created_at`, `user_id`, `request_id` for efficient querying
+
+- **Table: `eng_patterns`**
+  - RAG for engineering patterns & best practices
+  - `id`, `content`, `tags[]`, `strategy_type`, `target_contexts[]`, `embedding`, `metadata` (JSONB)
+  - Enables semantic search of coding patterns for AI-assisted development
+
+#### 🔹 OpenAI API (External)
+- Handles:
+  - Embedding generation (`text-embedding-3-small`)
+  - Chat completion (`gpt-4o`)
+- API key stored in `.env` and not exposed to the user
+
+### 📊 Database Schema
+
+| Table             | Purpose                                          | Key Columns                                                                     |
+|-------------------|--------------------------------------------------|---------------------------------------------------------------------------------|
+| memory_shards     | Stores contextual memory chunks + vectors        | id, user_id, content, embedding, tags, source, metadata (JSONB)                 |
+| raw_conversations | Logs input/output and metadata for observability | id, created_at, request_id, provider, model, messages (JSONB), response (JSONB)|
+| eng_patterns      | RAG for engineering patterns & best practices    | id, content, tags[], strategy_type, target_contexts[], embedding, metadata (JSONB)|
+
+### 🔄 Prompt Construction
+- **Retrieved Memory:** Top N relevant `memory_shards` (ordered by similarity)
+- **Recent Conversation:** Up to 5 latest turns, if available
+- **User Message:** Latest input from OpenWebUI
+- This full message list is sent to OpenAI's chat/completions endpoint
+
+### 🧩 Memory Flow
+
+```mermaid
+graph TD;
+    A[User Prompt] --> B[Embedding Generation];
+    B --> C[Semantic Search in pgvector];
+    C --> D[Top-N Contexts Retrieved];
+    D --> E[System + User Message Assembly];
+    E --> F[LLM GPT-4o Call];
+    F --> G[Response Parsed + Displayed];
+    G --> H1[raw_conversations];
+    G --> H2[memory_shards];
+```
+
+### 🪛 Developer Notes
+- CORS is enabled for local development (e.g., OpenWebUI)
+- Config values loaded from `.env`: model names, API keys, DB URL
+- Retrieval metric defaults to cosine similarity (recommended for OpenAI embeddings)
+- IVFFlat index on `embedding` column can be enabled via env to improve top-k performance
+- `.env.example` included for onboarding new developers
+- All context injection is done server-side; OpenWebUI stays unchanged
+- Database migrations managed via Alembic (see `docs/DB_MIGRATIONS.md`)
+
+---
+
+## Part II: Deployment Architecture (Containerization & Multi-AI)
+
+---
+
+## Part II: Deployment Architecture (Containerization & Multi-AI)
+
+### Network Architecture
+
+#### Network Layers
 1. **External Network**
    - WireGuard VPN for secure remote access
    - Public-facing services (if any)
@@ -20,7 +151,7 @@ This document describes the containerized deployment architecture for Aletheia a
    - `aletheia-net`: Aletheia's internal services
    - `logos-net`: Logos's internal services
 
-### Container Services
+#### Container Services
 
 ```mermaid
 graph TB
@@ -57,7 +188,7 @@ graph TB
     L_API --> GPU
 ```
 
-## Container Configuration
+### Container Configuration
 
 ### Base Docker Compose Structure
 ```yaml
@@ -69,7 +200,7 @@ services:
     networks:
       - aletheia-net
       - hearthminds-net
-  
+
   aletheia-db:
     networks:
       - aletheia-net
@@ -107,7 +238,7 @@ networks:
         - subnet: 10.10.0.0/24
 ```
 
-## AI Communication Protocol
+### AI Communication Protocol
 
 ### HearthMinds Network Protocol
 1. **Proxy Services**
@@ -136,7 +267,7 @@ networks:
    - Regular key rotation
    - Audit logging of all inter-AI communications
 
-## Deployment Considerations
+### Deployment Considerations
 
 ### Hardware Allocation
 - **GPUs**
@@ -160,7 +291,7 @@ networks:
 - Can be extended to multi-host with overlay networks
 - Service discovery via Docker DNS
 
-## Migration from Current Setup
+### Migration from Current Setup
 1. **Phase 1**: Container Migration
    - Convert existing bash scripts to Dockerfiles
    - Set up Docker Compose
@@ -176,7 +307,7 @@ networks:
    - Monitoring setup
    - Backup procedures
 
-## Script Conversion to Container Deployment
+### Script Conversion to Container Deployment
 
 ### Current Script to Container Mapping
 
@@ -253,7 +384,7 @@ CREATE TABLE eng_patterns (
 
 # File: init-scripts/04-indexes.sql
 -- Create all necessary indexes
-CREATE INDEX eng_patterns_embedding_idx ON eng_patterns 
+CREATE INDEX eng_patterns_embedding_idx ON eng_patterns
 USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 100);
 

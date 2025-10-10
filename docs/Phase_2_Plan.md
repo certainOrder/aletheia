@@ -76,7 +76,7 @@ Key context updates since initial draft:
 
 - Docs
   - [x] Update `DEV_ENVIRONMENT.md` with new envs and tuning tips (metric, lists, chunk sizes, history, token budget).
-  - [x] Update `architecture_overview.md` references to explicitly note cosine + IVFFlat and score exposure.
+  - [x] Update `ARCHITECTURE.md` references to explicitly note cosine + IVFFlat and score exposure.
   - [x] Add a short `DB_MIGRATIONS.md` note about IVFFlat creation timing and ANALYZE guidance.
 
 ### M3: Schema migrations (extensions)
@@ -136,7 +136,7 @@ Key context updates since initial draft:
   - [x] Offline-friendly: all tests run with `DEV_FALLBACKS=true` and no external calls
 
 - Docs
-  - [x] `architecture_overview.md`: add `source`/`metadata` fields to memory shard description and note `raw_conversations` persistence
+  - [x] `ARCHITECTURE.md`: add `source`/`metadata` fields to memory shard description and note `raw_conversations` persistence
   - [x] `DEV_ENVIRONMENT.md`: document new request fields and example payloads
   - [x] `DB_MIGRATIONS.md`: add revision notes for `0004`, `0005`, backfill behavior, and indexes
 

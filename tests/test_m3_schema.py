@@ -7,12 +7,10 @@ Covers:
 - Migration idempotence and offline-friendly behavior
 """
 
-import json
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
 from app.main import app
 
@@ -37,7 +35,7 @@ def test_index_memory_with_source_and_metadata(client, dummy_db):
             },
         )
         assert response.status_code == 200
-        shard_id = response.json()["id"]
+        _shard_id = response.json()["id"]
 
         # Verify source and metadata were stored (via dummy DB)
         added_shard = dummy_db.added[-1]

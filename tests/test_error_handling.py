@@ -3,10 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-
-from app.main import app
 from fastapi.testclient import TestClient
 
+from app.main import app
 
 router = APIRouter()
 

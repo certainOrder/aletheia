@@ -10,8 +10,6 @@ and creates helpful indexes for common query patterns.
 
 from __future__ import annotations
 
-import sqlalchemy as sa
-
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -22,10 +20,26 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add optional content provenance and metadata
-    op.add_column("memory_shards", sa.Column("source", sa.Text(), nullable=True))
-    op.add_column(
-        "memory_shards", sa.Column("metadata", sa.dialects.postgresql.JSONB(), nullable=True)
+    # Add optional content provenance and metadata (idempotent)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='memory_shards' AND column_name='source'
+            ) THEN
+                ALTER TABLE memory_shards ADD COLUMN source TEXT;
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='memory_shards' AND column_name='metadata'
+            ) THEN
+                ALTER TABLE memory_shards ADD COLUMN metadata JSONB;
+            END IF;
+        END$$;
+        """
     )
 
     # Index on user_id for scoped queries (if not already present)

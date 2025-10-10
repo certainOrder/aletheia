@@ -46,8 +46,7 @@ def upgrade() -> None:
             "SELECT json_build_object("
             "'event','index_build',"
             "'index','ix_memory_shards_embedding_ivfflat_cosine',"
-            "'lists', %s)",
-            (lists,),
+            f"'lists', {lists})"
         )
         op.execute(
             "CREATE INDEX IF NOT EXISTS ix_memory_shards_embedding_ivfflat_cosine "

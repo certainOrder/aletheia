@@ -69,6 +69,32 @@ curl -s -X POST http://localhost:8000/index-memory \
   -d '{"content":"OpenAI released new embedding models.","metadata":{"source":"smoke-test"}}'
 ```
 
+**M3: Index with source and metadata:**
+
+```bash
+curl -s -X POST http://localhost:8000/index-memory \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "content":"Oranges are rich in vitamin C and antioxidants.",
+    "tags":["nutrition","citrus"],
+    "source":"https://example.com/health-benefits",
+    "metadata":{"topic":"health","verified":true}
+  }'
+```
+
+**M3: Ingest (chunked) with provenance:**
+
+```bash
+curl -s -X POST http://localhost:8000/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "content":"Very long article content here...",
+    "tags":["article"],
+    "source":"batch-import-2024",
+    "metadata":{"batch_id":"abc123","priority":"high"}
+  }'
+```
+
 4) RAG chat query:
 
 ```bash
@@ -83,6 +109,28 @@ curl -s -X POST http://localhost:8000/rag-chat \
 curl -s -X POST http://localhost:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"OpenAI released new embedding models."}]}'
+```
+
+**M3: Verify aletheia_context includes source and metadata:**
+
+```bash
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"What are the health benefits of oranges?"}]}' \
+  | jq '.aletheia_context[0] | {content: .content[:60], score, source, metadata}'
+```
+
+Expected response (if content was indexed with source/metadata):
+```json
+{
+  "content": "Oranges are rich in vitamin C and antioxidants.",
+  "score": 0.723,
+  "source": "https://example.com/health-benefits",
+  "metadata": {
+    "topic": "health",
+    "verified": true
+  }
+}
 ```
 
 If `DEV_FALLBACKS=true`, responses are generated locally; otherwise, real OpenAI calls are made (requires `OPENAI_API_KEY`).

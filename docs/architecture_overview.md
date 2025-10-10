@@ -57,9 +57,16 @@ Log raw_conversations (request/response metadata)
 - Stores vectorized memory as context.
 - **Table:** `memory_shards`
   - `id`, `user_id`, `content`, `embedding`, `tags`
+  - **M3 additions:** `source` (TEXT, nullable), `metadata` (JSONB, nullable)
+    - `source`: Optional free-form origin (e.g., URL, file path, "wikipedia")
+    - `metadata`: Flexible JSONB for arbitrary key-values (e.g., `{"topic": "health", "verified": true}`)
 - Embeddings are 1536-dimensional vectors (OpenAI default).
 - Search returns top-k similar context chunks using pgvector. Scores are computed (cosine-based) and surfaced back to clients in `aletheia_context`.
-- Also logs chat history to `raw_conversations`.
+- **Table:** `raw_conversations`
+  - `id`, `created_at`, `request_id`, `user_id`, `provider`, `model`
+  - `messages` (JSONB), `response` (JSONB), `status_code`, `latency_ms`
+  - Logs every chat request/response for observability and replay
+  - Indexed on `created_at`, `user_id`, `request_id` for efficient querying
 
 ### 🔹 OpenAI API (External)
 - Handles:
@@ -70,10 +77,10 @@ Log raw_conversations (request/response metadata)
 ---
 
 ## 📊 Database Schema (Simplified)
-| Table             | Purpose                                 |
-|-------------------|-----------------------------------------|
-| memory_shards     | Stores contextual memory chunks + vecs   |
-| raw_conversations | Logs input/output and metadata           |
+| Table             | Purpose                                          | Key Columns                                                                     |
+|-------------------|--------------------------------------------------|---------------------------------------------------------------------------------|
+| memory_shards     | Stores contextual memory chunks + vectors        | id, user_id, content, embedding, tags, source, metadata (JSONB)                 |
+| raw_conversations | Logs input/output and metadata for observability | id, created_at, request_id, provider, model, messages (JSONB), response (JSONB)|
 
 ---
 

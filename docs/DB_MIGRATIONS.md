@@ -61,6 +61,24 @@ Tuning notes
 docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ANALYZE memory_shards"
 ```
 
+### M3: Content metadata and raw conversations (0004, 0005)
+
+- **Migration 0004** adds `source` (TEXT) and `metadata` (JSONB) columns to `memory_shards` for content provenance.
+  - `source`: Optional free-form origin (e.g., URL, file path, "wikipedia")
+  - `metadata`: Flexible key-value storage (e.g., `{"topic": "health", "verified": true}`)
+  - Creates indexes: BTree on `user_id`, GIN on `metadata` (jsonb_path_ops) for key filtering
+  - Idempotent: uses DO blocks to check existence before adding columns
+
+- **Migration 0005** creates/augments `raw_conversations` table for request/response logging.
+  - Columns: `id`, `created_at`, `request_id`, `user_id`, `provider`, `model`, `messages` (JSONB), `response` (JSONB), `status_code`, `latency_ms`
+  - Indexes on `created_at`, `user_id`, `request_id` for efficient querying
+  - Idempotent: safe to run on existing populated DBs
+  - Every `/v1/chat/completions` call persists a row for observability and replay
+
+Backfill notes:
+- Existing shards without `source`/`metadata` will have NULL values (no backfill needed)
+- `raw_conversations` logging is forward-only (no historical data backfill)
+
 ## Troubleshooting: existing tables, no Alembic state
 
 If you see errors like `psycopg.errors.DuplicateTable: relation "..." already exists` during

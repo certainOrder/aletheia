@@ -101,12 +101,12 @@ Key context updates since initial draft:
   - [x] Confirm/retain `embedding` vector index (HNSW/IVFFlat as configured) is unchanged by migration
 
 - New table: raw_conversations
-  - [ ] Create `raw_conversations` with columns:
+  - [x] Create `raw_conversations` with columns:
     - `id UUID PK`, `created_at TIMESTAMPTZ DEFAULT now()`
     - `request_id TEXT`, `user_id TEXT NULL`, `provider TEXT`, `model TEXT`
     - `messages JSONB` (request payload), `response JSONB` (assistant reply + usage)
     - `status_code INT` (HTTP response code), `latency_ms INT` (optional)
-  - [ ] Indexes: BTree on `(created_at)`, `(user_id)`, and optional `(request_id)`
+  - [x] Indexes: BTree on `(created_at)`, `(user_id)`, and optional `(request_id)`
 
   Status: Table existed from 0002; augmented in 0005 with `created_at`, `request_id`, `provider`, `model`, `messages`, `response`, `status_code`, and `latency_ms`. Indexes created on `created_at`, `user_id`, and `request_id`.
 
@@ -125,8 +125,8 @@ Key context updates since initial draft:
 
 - Raw conversations persistence (app layer)
   - [x] In `/v1/chat/completions`, insert a `raw_conversations` record containing: request `messages`, selected `model`, provider, `request_id`, response object, status, and duration
-  - [ ] Ensure behavior is offline-friendly with `DEV_FALLBACKS=true` (no network required)
-  - [ ] Add log hooks: `raw_conversations_saved` with `id`, `request_id`
+  - [x] Ensure behavior is offline-friendly with `DEV_FALLBACKS=true` (no network required)
+  - [x] Add log hooks: `raw_conversations_saved` with `id`, `request_id`
 
 - Tests
   - [x] Migration smoke: `alembic upgrade head` and `downgrade -1` roundtrip on temp DB without data loss

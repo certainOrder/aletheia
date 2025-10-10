@@ -79,6 +79,19 @@ Backfill notes:
 - Existing shards without `source`/`metadata` will have NULL values (no backfill needed)
 - `raw_conversations` logging is forward-only (no historical data backfill)
 
+### Engineering Patterns RAG (0006)
+
+- **Migration 0006** adds `eng_patterns` table for RAG-based engineering pattern management.
+  - Stores reusable patterns, coding standards, best practices for AI-assisted development
+  - Columns: `id`, `content`, `tags[]`, `strategy_type`, `target_contexts[]`, `last_updated`, `author`, `embedding` (vector 1536), `metadata` (JSONB)
+  - Supports semantic search via pgvector embeddings to retrieve relevant patterns for specific file contexts
+  - Indexes:
+    - IVFFlat on `embedding` for vector cosine similarity (lists=100)
+    - GIN on `tags` for efficient tag array filtering
+    - BTree on `strategy_type` and `last_updated DESC`
+  - Use case: Query patterns by target context (e.g., `api/*.py`) and semantic similarity to generate AI context files
+  - Idempotent: safe CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS
+
 ## Troubleshooting: existing tables, no Alembic state
 
 If you see errors like `psycopg.errors.DuplicateTable: relation "..." already exists` during

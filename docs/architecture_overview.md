@@ -81,6 +81,7 @@ Log raw_conversations (request/response metadata)
 |-------------------|--------------------------------------------------|---------------------------------------------------------------------------------|
 | memory_shards     | Stores contextual memory chunks + vectors        | id, user_id, content, embedding, tags, source, metadata (JSONB)                 |
 | raw_conversations | Logs input/output and metadata for observability | id, created_at, request_id, provider, model, messages (JSONB), response (JSONB)|
+| eng_patterns      | RAG for engineering patterns & best practices    | id, content, tags[], strategy_type, target_contexts[], embedding, metadata (JSONB)|
 
 ---
 

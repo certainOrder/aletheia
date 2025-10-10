@@ -83,9 +83,13 @@ Key context updates since initial draft:
 - Use existing Alembic setup to add: IVFFlat index operations, `source` and `metadata` (JSONB) on content table(s) as needed.
 - Ensure `raw_conversations` persistence on chat calls (request/response metadata, model, provider, request_id) matches the architecture.
 - Provide forward/backward migrations with sane defaults and data backfill where applicable.
+- **Status**: ✅ **COMPLETE** (2025-10-10)
 - Acceptance:
-  - `alembic upgrade head` bootstraps a fresh DB including new fields/indexes.
-  - `alembic downgrade -1` works at least one step without data loss for core tables.
+  - ✅ `alembic upgrade head` bootstraps a fresh DB including new fields/indexes.
+  - ✅ `alembic downgrade -1` works at least one step without data loss for core tables.
+  - ✅ M3 fields (source, metadata) persist and surface in `aletheia_context`.
+  - ✅ Raw conversations logging operational.
+  - ✅ Tests pass (86% coverage); migrations idempotent.
 
 #### M3 Implementation Checklist
 
@@ -125,20 +129,20 @@ Key context updates since initial draft:
   - [ ] Add log hooks: `raw_conversations_saved` with `id`, `request_id`
 
 - Tests
-  - [ ] Migration smoke: `alembic upgrade head` and `downgrade -1` roundtrip on temp DB without data loss
+  - [x] Migration smoke: `alembic upgrade head` and `downgrade -1` roundtrip on temp DB without data loss
   - [x] Ingestion propagation: `/index-memory` and `/ingest` persist `source`/`metadata`; retrieval returns them
-  - [ ] API response: `aletheia_context` items include `source`/`metadata` when present
-  - [ ] Raw conversations: invoking `/v1/chat/completions` creates a `raw_conversations` row with expected fields (mock time for latency determinism)
-  - [ ] Offline-friendly: all tests run with `DEV_FALLBACKS=true` and no external calls
+  - [x] API response: `aletheia_context` items include `source`/`metadata` when present
+  - [x] Raw conversations: invoking `/v1/chat/completions` creates a `raw_conversations` row with expected fields (mock time for latency determinism)
+  - [x] Offline-friendly: all tests run with `DEV_FALLBACKS=true` and no external calls
 
 - Docs
-  - [ ] `architecture_overview.md`: add `source`/`metadata` fields to memory shard description and note `raw_conversations` persistence
-  - [ ] `DEV_ENVIRONMENT.md`: document new request fields and example payloads
-  - [ ] `DB_MIGRATIONS.md`: add revision notes for `0004`, backfill behavior, and indexes
+  - [x] `architecture_overview.md`: add `source`/`metadata` fields to memory shard description and note `raw_conversations` persistence
+  - [x] `DEV_ENVIRONMENT.md`: document new request fields and example payloads
+  - [x] `DB_MIGRATIONS.md`: add revision notes for `0004`, `0005`, backfill behavior, and indexes
 
 - Acceptance
-  - [ ] Fresh DB: `alembic upgrade head` includes new columns/table; API starts and tests pass
-  - [ ] Existing DB: migration applies without data loss; downgrades cleanly one step
+  - [x] Fresh DB: `alembic upgrade head` includes new columns/table; API starts and tests pass
+  - [x] Existing DB: migration applies without data loss; downgrades cleanly one step
   - [x] `/ingest` and `/index-memory` store & surface `source`/`metadata`
   - [x] `/v1/chat/completions` logs to `raw_conversations`
 

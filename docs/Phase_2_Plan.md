@@ -154,6 +154,60 @@ Key context updates since initial draft:
   - PRs run tests automatically and pass the coverage threshold.
   - No network calls in tests unless explicitly allowed; fallbacks/mocks used.
 
+#### M4 Implementation Checklist
+
+- Unit test coverage expansion
+  - [ ] Test provider selection logic: verify `DEV_FALLBACKS=true` uses fallback, `=false` with valid key uses OpenAI
+  - [ ] Test search ordering: verify results sorted by cosine score (descending); scores present in response
+  - [ ] Test chat response shape: validate OpenAI-compatible structure (choices, model, usage, aletheia_context)
+  - [ ] Test chunking edge cases: empty input, single chunk, exact boundaries, overlap behavior
+  - [ ] Test token budget enforcement: verify truncation when history + context exceeds limit
+  - [ ] Test error handling: missing API key returns 500 with actionable message; fallback errors handled gracefully
+
+- Integration test suite (offline-friendly)
+  - [ ] Create integration test fixture with temporary Postgres + pgvector (or use existing dummy_db)
+  - [ ] Test full ingest → query flow: index content, perform semantic search, verify top-k retrieval
+  - [ ] Test migration roundtrip: fresh DB upgrade to head, verify schema; downgrade one step, verify no data loss
+  - [ ] Test end-to-end chat: index memory, call `/v1/chat/completions`, verify context injection and raw_conversations logging
+  - [ ] Ensure all integration tests use `DEV_FALLBACKS=true` or mocked OpenAI responses (no network calls)
+
+- CI/CD setup (GitHub Actions)
+  - [ ] Create `.github/workflows/ci.yml` workflow file
+  - [ ] Job: Lint - run `ruff check` on all Python files
+  - [ ] Job: Format check - run `black --check` and `ruff format --check`
+  - [ ] Job: Type check - run `mypy` with strict config
+  - [ ] Job: Tests - run `pytest` with coverage reporting
+  - [ ] Coverage gate: fail if coverage < 85% (use `pytest-cov` with `--cov-fail-under=85`)
+  - [ ] Matrix strategy: test on Python 3.11 (add 3.12 if desired)
+  - [ ] Service container: Postgres 16 with pgvector for integration tests
+  - [ ] Environment: set `DEV_FALLBACKS=true` and mock DB credentials for CI runs
+  - [ ] Trigger: on push to `main` and `feature/*` branches, and on pull requests
+
+- Test configuration & tooling
+  - [ ] Add `pytest.ini` or `pyproject.toml` config: coverage settings, test discovery patterns
+  - [ ] Ensure `conftest.py` fixtures are reusable across unit and integration tests
+  - [ ] Add `--cov=app --cov-report=term-missing` to pytest invocation for detailed coverage
+  - [ ] Document test commands in `README.md` or `DEV_ENVIRONMENT.md` (e.g., `make test`, `pytest -v`)
+
+- Test improvements & missing coverage
+  - [ ] Identify gaps: run `pytest --cov=app --cov-report=html` and review uncovered lines
+  - [ ] Add tests for `/ingest` endpoint: chunk propagation, source/metadata persistence
+  - [ ] Add tests for `/index-memory`: direct embedding save, metadata handling
+  - [ ] Add tests for error paths: invalid JSON, missing required fields, DB connection failures
+  - [ ] Add tests for migration idempotence: run upgrade twice, verify no errors
+
+- Documentation updates
+  - [ ] `README.md`: Add "Running Tests" section with commands and coverage threshold
+  - [ ] `DEV_ENVIRONMENT.md`: Document test environment setup, fixtures, and offline testing strategy
+  - [ ] `.github/workflows/ci.yml`: Add inline comments explaining each job and step
+  - [ ] Add CI badge to `README.md` showing build status (once workflow is active)
+
+- Acceptance verification
+  - [ ] Run full test suite locally: `make test` or `pytest` passes with ≥85% coverage
+  - [ ] Push to feature branch: GitHub Actions workflow triggers and passes all jobs
+  - [ ] Verify no network calls in CI: check workflow logs for absence of external API calls
+  - [ ] Coverage report shows all critical paths tested (retrieval, ingestion, chat, migrations)
+
 ### M5: Streaming & UX improvements (OpenWebUI)
 - Add `stream=true` support to `/v1/chat/completions` (SSE) with OpenAI-compatible `delta` payloads.
 - Ensure retrieved grounding context is returned in API responses (already present as `aletheia_context`) and surfaced within OpenWebUI.

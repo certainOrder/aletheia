@@ -14,12 +14,11 @@ load_dotenv(DEFAULT_ENV_PATH)
 def env(key: str, default: str | None = None) -> str | None:
     return os.getenv(key, default)
 
+# Default database URL for the HearthMinds infrastructure database
+DATABASE_URL = env("DATABASE_URL") or "postgresql+psycopg://hearthminds:hearthminds@10.0.0.1:5432/hearthminds"
 
 class Settings(BaseModel):
-    DATABASE_URL: str = (
-        env("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/aletheia")
-        or "postgresql+psycopg://postgres:postgres@localhost:5432/aletheia"
-    )
+    DATABASE_URL: str = DATABASE_URL
     POSTGRES_ADMIN_PASSWORD: str = env("POSTGRES_ADMIN_PASSWORD", "postgres") or "postgres"
     LOGOS_PASSWORD: str = env("LOGOS_PASSWORD", "logos") or "logos"
     ALETHEIA_PASSWORD: str = env("ALETHEIA_PASSWORD", "aletheia") or "aletheia"

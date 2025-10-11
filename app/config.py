@@ -1,7 +1,9 @@
 import os
 from typing import Optional
+from functools import lru_cache
 
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 # Load .env from repo root by default
 REPO_ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -13,10 +15,19 @@ def env(key: str, default: str | None = None) -> str | None:
     return os.getenv(key, default)
 
 
-DATABASE_URL: str = (
-    env("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/aletheia")
-    or "postgresql+psycopg://postgres:postgres@localhost:5432/aletheia"
-)
+class Settings(BaseModel):
+    DATABASE_URL: str = (
+        env("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/aletheia")
+        or "postgresql+psycopg://postgres:postgres@localhost:5432/aletheia"
+    )
+    POSTGRES_ADMIN_PASSWORD: str = env("POSTGRES_ADMIN_PASSWORD", "postgres") or "postgres"
+    LOGOS_PASSWORD: str = env("LOGOS_PASSWORD", "logos") or "logos"
+    ALETHEIA_PASSWORD: str = env("ALETHEIA_PASSWORD", "aletheia") or "aletheia"
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()
 
 OPENAI_API_KEY: Optional[str] = env("OPENAI_API_KEY")
 

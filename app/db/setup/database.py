@@ -139,13 +139,28 @@ class DatabaseSetup:
                 use_sudo=True
             )
             if result.success:
+                # Create system user for service if it doesn't exist
+                user_check = self.executor.run_command(
+                    "id -u hearthminds-service",
+                    use_sudo=True
+                )
+                if not user_check.success:
+                    logger.info("Creating system user for hearthminds-service...")
+                    self.executor.run_command(
+                        "useradd -r -s /bin/false -m hearthminds-service",
+                        use_sudo=True
+                    )
+                    self.executor.run_command(
+                        "usermod -aG postgres hearthminds-service",
+                        use_sudo=True
+                    )
                 return True
             time.sleep(1)
         return False
 
     def validate_users_exist(self) -> bool:
         """Check if required users exist"""
-        for user in ['hearthminds', 'logos', 'aletheia']:
+        for user in ['hearthminds-service', 'hearthminds', 'logos', 'aletheia']:
             check_cmd = f"sudo -u postgres psql -tc \"SELECT 1 FROM pg_roles WHERE rolname = '{user}'\""
             result = self.executor.run_command(check_cmd, use_sudo=True)
             if not (result.success and "1" in result.stdout):
@@ -163,31 +178,25 @@ class DatabaseSetup:
                 return False
         return True
 
-    def create_databases(self) -> bool:
-        """Create all required databases"""
-        logger.info("Creating databases and users...")
-        
-        # Make sure PostgreSQL is running first
-        if not self.start_postgres():
-            logger.error("Failed to start PostgreSQL")
-            return False
-            
-        # Initial SQL setup - create users and databases
+    def execute_database_creation(self) -> bool:
+        """Execute the SQL to create databases and users"""
         setup_sql = """
-        -- Create admin user
+        -- Create service and application users
+        CREATE USER "hearthminds-service" LOGIN;
         CREATE USER hearthminds WITH PASSWORD 'hearthminds' SUPERUSER;
-        
-        -- Create AI users
         CREATE USER logos WITH PASSWORD 'logos';
         CREATE USER aletheia WITH PASSWORD 'aletheia';
         
         -- Create databases with proper encoding and template
-        CREATE DATABASE hearthminds WITH OWNER = hearthminds ENCODING = 'UTF8' TEMPLATE = template0;
+        CREATE DATABASE hearthminds WITH OWNER = "hearthminds-service" ENCODING = 'UTF8' TEMPLATE = template0;
         CREATE DATABASE logos WITH OWNER = logos ENCODING = 'UTF8' TEMPLATE = template0;
         CREATE DATABASE aletheia WITH OWNER = aletheia ENCODING = 'UTF8' TEMPLATE = template0;
+        
+        -- Grant necessary permissions
+        GRANT hearthminds TO "hearthminds-service";
+        GRANT ALL PRIVILEGES ON DATABASE hearthminds TO "hearthminds-service";
         """
         
-        # Perform action - with error stopping enabled
         result = self.executor.run_command(
             f"""sudo -i -u postgres psql -v ON_ERROR_STOP=1 <<EOF
 {setup_sql}
@@ -196,14 +205,28 @@ EOF""",
         )
         
         if not result.success:
-            logger.error(f"SQL execution failed: {result.stderr}")
+            logger.error(f"Database creation SQL failed: {result.stderr}")
+            return False
+        return True
+
+    def create_databases(self) -> bool:
+        """Create all required databases"""
+        logger.info("Creating databases and users...")
+        
+        # Validate PostgreSQL is running
+        if not self.start_postgres():
+            logger.error("Failed to start PostgreSQL")
+            return False
+            
+        # Perform creation action
+        if not self.execute_database_creation():
             return False
         
-        # Check users were created first
+        # Validate users were created
         if not self.validate_users_exist():
             return False
             
-        # Then validate databases exist
+        # Validate databases exist
         success = self.validate_databases_exist()
         
         # Log result
@@ -213,7 +236,7 @@ EOF""",
         # Verify each database exists before proceeding
         for db in ['hearthminds', 'logos', 'aletheia']:
             for _ in range(5):  # Try up to 5 times
-                check_cmd = f"sudo -u postgres psql -tc \"SELECT 1 FROM pg_database WHERE datname = '{db}'\""
+                check_cmd = f"sudo -u hearthminds-service psql -tc \"SELECT 1 FROM pg_database WHERE datname = '{db}'\""
                 result = self.executor.run_command(check_cmd, use_sudo=True)
                 if result.success and "1" in result.stdout:
                     break
@@ -223,10 +246,12 @@ EOF""",
                 logger.error(f"Database {db} was not created successfully")
                 return False
             
-        # Enable vector extension in each database
+        # Enable vector extension in each database (must be superuser)
         for db in ['hearthminds', 'logos', 'aletheia']:
             result = self.executor.run_command(
-                f"""sudo -u postgres bash -c 'psql -d {db} -c "CREATE EXTENSION IF NOT EXISTS vector;"'""",
+                f"""sudo -u postgres psql -d {db} -c "CREATE EXTENSION IF NOT EXISTS vector;"
+                   sudo -u postgres psql -d {db} -c "ALTER EXTENSION vector OWNER TO hearthminds;"
+                """,
                 use_sudo=True
             )
             if not result.success:
@@ -241,17 +266,39 @@ EOF""",
         """
         
         result = self.executor.run_command(
-            f"echo {access_sql!r} | sudo -u postgres psql",
+            f"echo {access_sql!r} | sudo -u hearthminds-service psql",
             use_sudo=True
         )
         return result.success
         
     def validate_schema(self, db: str, table_name: str) -> bool:
         """Check if a schema has been properly deployed by checking for a key table"""
-        check_cmd = f"""sudo -i -u postgres psql -d {db} -tc "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '{table_name}')" """
+        check_cmd = f"""sudo -u postgres psql -d {db} -tc "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '{table_name}')" """
         result = self.executor.run_command(check_cmd, use_sudo=True)
         if not (result.success and "t" in result.stdout.lower()):
             logger.error(f"Schema validation failed for {db}: {table_name} table not found")
+            return False
+        return True
+
+    def validate_schema_file_exists(self, schema_path: str) -> bool:
+        """Check if schema file exists and is readable"""
+        try:
+            with open(schema_path, 'r') as f:
+                return bool(f.read().strip())
+        except Exception as e:
+            logger.error(f"Schema file validation failed for {schema_path}: {e}")
+            return False
+
+    def validate_schema_deployment(self, db: str, schema_sql: str) -> bool:
+        """Execute schema deployment and validate success"""
+        result = self.executor.run_command(
+            f"""cat <<'EOF' | sudo -u postgres psql -v ON_ERROR_STOP=1 -d {db}
+{schema_sql}
+EOF""",
+            use_sudo=True
+        )
+        if not result.success:
+            logger.error(f"Schema deployment failed for {db}: {result.stderr}")
             return False
         return True
 
@@ -259,51 +306,47 @@ EOF""",
         """Deploy a schema to a specific database"""
         logger.info(f"Deploying schema to {db}...")
         
-        # Read the schema file
-        try:
-            with open(schema_path, 'r') as f:
-                schema_sql = f.read().strip()
-        except Exception as e:
-            logger.error(f"Failed to read schema file {schema_path}: {e}")
+        # Validate schema file
+        if not self.validate_schema_file_exists(schema_path):
             return False
 
-        # Deploy the schema with proper environment
-        result = self.executor.run_command(
-            f"""cat <<'EOF' | sudo -i -u postgres psql -v ON_ERROR_STOP=1 -d {db}
-{schema_sql}
-EOF""",
-            use_sudo=True
-        )
-
-        if not result.success:
-            logger.error(f"Failed to deploy schema to {db}: {result.stderr}")
-            return False
-            
-        return True
+        # Read schema content
+        with open(schema_path, 'r') as f:
+            schema_sql = f.read().strip()
+        
+        # Perform deployment
+        success = self.validate_schema_deployment(db, schema_sql)
+        
+        # Log result
+        logger.info(f"Schema deployment to {db} {'succeeded' if success else 'failed'}")
+        return success
 
     def deploy_schemas(self) -> bool:
         """Deploy SQL schemas to databases"""
         logger.info("Deploying database schemas...")
         
-        # Map of database to (schema file, validation table)
+        # Schema configuration definition
         schema_configs = {
             'hearthminds': ('/home/chapinad/projects/openai_pgvector_api/app/db/schema/hm_schema.sql', 'eng_patterns'),
             'logos': ('/home/chapinad/projects/openai_pgvector_api/app/db/schema/pp_schema.sql', 'user_profiles'),
             'aletheia': ('/home/chapinad/projects/openai_pgvector_api/app/db/schema/pp_schema.sql', 'user_profiles')
         }
         
-        # Deploy each schema
+        # Deploy each schema with validation
         for db, (schema_file, check_table) in schema_configs.items():
-            # Perform action
+            # Perform schema deployment
+            logger.info(f"Deploying schema to {db}...")
             if not self.deploy_schema_to_db(db, schema_file):
                 return False
                 
-            # Validate result
-            if not self.validate_schema(db, check_table):
-                return False
-                
+            # Independent validation
+            success = self.validate_schema(db, check_table)
+            
             # Log result
-            logger.info(f"Schema deployment to {db} succeeded")
+            logger.info(f"Schema deployment to {db} {'succeeded' if success else 'failed'}")
+            
+            if not success:
+                return False
             
         return True
         

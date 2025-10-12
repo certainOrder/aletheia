@@ -15,6 +15,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def nuclear_test(host: str):
+    # Show warning and required setup
+    print("\n=== Required Setup: Temporary Sudo Access ===")
+    print("Before proceeding, run these commands on the target system:")
+    print("\n1. Add sudo permissions:   sudo EDITOR=nano visudo -f /etc/sudoers.d/postgresql-management")
+    print("2. Add this line:          my_username ALL=(ALL) NOPASSWD: ALL")
+    print("3. Verify syntax:          sudo visudo -c -f /etc/sudoers.d/postgresql-management")
+    print("\nNOTE: Remember to remove permissions after completion:")
+    print("      sudo rm /etc/sudoers.d/postgresql-management")
+    print("\nThis is a temporary solution until proper certificate management is implemented.")
+    
+    # Get confirmation
+    confirm = input("\nHave you added the required sudo permissions? (type 'yes' to proceed): ")
+    if confirm.lower() != 'yes':
+        logger.error("Aborted. Please add the required sudo permissions and try again.")
+        return False
+    
     logger.info("Starting nuclear reset test...")
     
     # Initialize with nuclear option

@@ -1,0 +1,7 @@
+services:
+  aletheia-api:
+    environment:
+      DEV_FALLBACKS: "false"
+      INDEX_CHAT_HISTORY: "true"
+      LOG_REQUEST_HEADERS: "true"
+      # ENABLE_DEBUG_ENDPOINTS: "true"

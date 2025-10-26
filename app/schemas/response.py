@@ -13,11 +13,22 @@ class IndexMemoryResponse(BaseModel):
     id: str = Field(..., description="UUID of the created memory shard")
 
 
+class IngestResponse(BaseModel):
+    """Response for `/ingest` containing IDs of created shards."""
+
+    ids: list[str] = Field(..., description="UUIDs of created memory shards")
+
+
 class RetrievedContextItem(BaseModel):
     id: str
     content: str
     user_id: str | None = None
     tags: list[str] | None = None
+    # New in M3: richer retrieval metadata
+    score: float | None = None
+    source: str | None = None
+    metadata: dict | None = None
+    # Back-compat: previously used 'distance'; keep optional for older clients
     distance: float | None = None
 
 

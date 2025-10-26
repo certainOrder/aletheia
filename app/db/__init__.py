@@ -9,10 +9,10 @@ from collections.abc import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import DATABASE_URL
+from app.config import get_settings
 
-assert isinstance(DATABASE_URL, str)
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+settings = get_settings()
+engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

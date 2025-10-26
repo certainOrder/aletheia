@@ -5,3 +5,4 @@ uvicorn
 psycopg[binary]
 sqlalchemy
 python-dotenv
+alembic

@@ -1,4 +1,10 @@
--- PostgreSQL DDL for core tables
+-- PostgreSQL DDL for EI-specific tables
+-- This schema defines the core tables needed for each Engineered Intelligence (EI)
+-- It will be applied to each EI's database (logos, aletheia, etc.)
+--
+-- Note: Shared infrastructure tables (like eng_patterns) are in shared_schema.sql
+-- and should be created in the hearthminds database only.
+--
 -- Requires pgvector extension for embedding fields
 
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -62,3 +68,5 @@ CREATE TABLE memory_shards (
     priority_score float,
     retention_policy text
 );
+
+

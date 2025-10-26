@@ -10,10 +10,10 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from time import time as _time
-from uuid import uuid4
+from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -22,7 +22,9 @@ from app.api.routes import router as api_router
 from app.config import (
     ALLOWED_ORIGINS,
     DEV_FALLBACKS,
+    INDEX_CHAT_HISTORY,
     LOG_LEVEL,
+    LOG_REQUEST_HEADERS,
     OPENAI_API_KEY,
     OPENAI_CHAT_MODEL,
 )
@@ -33,7 +35,7 @@ from app.config import (
     CHUNK_SIZE as DEFAULT_CHUNK_SIZE,
 )
 from app.db import engine, get_db
-from app.db.models import Base
+from app.db.models import Base, UserProfile
 from app.error_handlers import (
     handle_http_exception,
     handle_unhandled_exception,
@@ -275,17 +277,110 @@ async def ingest(req: IngestRequest, db: Session = Depends(get_db)):
     return {"ids": ids}
 
 
+# Helper: ensure a user_profile row exists and return its UUID string.
+def _ensure_user_profile(
+    db: Session, user_uuid: UUID | None, external_id: str | None
+) -> str | None:
+    if user_uuid is None and not external_id:
+        return None
+    try:
+        # Try by UUID first
+        if user_uuid is not None:
+            row = db.get(UserProfile, user_uuid)
+            if row is not None:
+                return str(row.id)
+        # Try by external_id
+        if external_id:
+            from sqlalchemy import select
+
+            res = db.execute(
+                select(UserProfile).where(UserProfile.external_id == external_id)
+            ).scalar_one_or_none()
+            if res is not None:
+                return str(res.id)
+        # Create new
+        uid = user_uuid or uuid4()
+        profile = UserProfile(id=uid, external_id=external_id, display_name=external_id)
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        return str(profile.id)
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return str(user_uuid) if user_uuid is not None else None
+
+
 # OpenAI-compatible chat completions endpoint for OpenWebUI
 @app.post("/v1/chat/completions", tags=["openai-compat"], response_model=dict)
-async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
+async def v1_chat_completions(payload: dict, request: Request, db: Session = Depends(get_db)):
     """OpenAI-compatible Chat Completions endpoint with optional RAG context injection."""
     _ensure_openai_ready()
     # Expecting { model?: str, messages: [{role, content}, ...], stream?: bool }
     messages = payload.get("messages", [])
+    # Optionally log headers (masked) for debugging client behavior like OpenWebUI
+    if LOG_REQUEST_HEADERS:
+        try:
+            masked = {}
+            for k, v in request.headers.items():
+                lk = k.lower()
+                if any(s in lk for s in ("authorization", "api-key", "x-api-key", "cookie")):
+                    masked[k] = "***masked***"
+                else:
+                    # clamp long values to 256 chars
+                    masked[k] = (v[:256] + "…") if isinstance(v, str) and len(v) > 256 else v
+            logger.info("request_headers", extra={"headers": masked})
+        except Exception:
+            pass
+    # Accept either OpenAI's "user" field or a custom "user_id"; prefer user_id
+    _incoming_user = payload.get("user_id") or payload.get("user")
+    # If not present in payload, allow common headers (useful for OpenWebUI custom headers)
+    if not _incoming_user:
+        _incoming_user = (
+            request.headers.get("x-user-id")
+            or request.headers.get("x-user")
+            or request.headers.get("x-openwebui-user")
+        )
+    # Normalize to a UUID for DB consistency. If a non-UUID string is provided,
+    # derive a stable UUIDv5 so the same string maps to the same user namespace.
+    user_id: UUID | None = None
+    if _incoming_user:
+        try:
+            user_id = UUID(str(_incoming_user))
+        except Exception:
+            user_id = uuid5(NAMESPACE_DNS, f"aletheia:{_incoming_user}")
+    # Ensure user profile exists to link OpenWebUI user to DB UUID (prevents FK issues)
+    persisted_user_id = _ensure_user_profile(
+        db, user_id, str(_incoming_user) if _incoming_user else None
+    )
+    if persisted_user_id and user_id is None:
+        try:
+            user_id = UUID(persisted_user_id)
+        except Exception:
+            pass
     model = payload.get("model")
     logger.info(
         "route_v1_chat_completions",
-        extra={"messages_count": len(messages or []), "model": model or OPENAI_CHAT_MODEL},
+        extra={
+            "messages_count": len(messages or []),
+            "model": model or OPENAI_CHAT_MODEL,
+            "user_id": str(user_id) if user_id else None,
+            "user_from": (
+                "payload"
+                if (payload.get("user_id") or payload.get("user"))
+                else (
+                    "header"
+                    if (
+                        request.headers.get("x-user-id")
+                        or request.headers.get("x-user")
+                        or request.headers.get("x-openwebui-user")
+                    )
+                    else None
+                )
+            ),
+        },
     )
     # Read dynamic config for history/budget to support test overrides
     from app.config import HISTORY_TURNS as DEFAULT_HISTORY_TURNS
@@ -356,10 +451,23 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
                 "query_len": len(query_text or ""),
                 "metric": (CONF_METRIC or "cosine"),
                 "top_k": 5,
+                "user_id": str(user_id) if user_id else None,
             },
         )
         qvec = convert_to_embedding(query_text)
-        context_results = semantic_search(db, qvec, limit=5)
+        context_results = semantic_search(
+            db, qvec, user_id=(str(user_id) if user_id else None), limit=5
+        )
+        if not context_results:
+            # If nothing found for this user, try an unscoped fallback
+            logger.info(
+                "retrieval_unscoped_fallback",
+                extra={
+                    "reason": "no_user_scoped_results",
+                    "user_id": str(user_id) if user_id else None,
+                },
+            )
+            context_results = semantic_search(db, qvec, user_id=None, limit=5)
         context_text = "\n\n---\n\n".join(r["content"] for r in context_results)
         # Prepend a system message with retrieved context
         system_prompt = (
@@ -519,32 +627,146 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
         },
         "aletheia_context": context_results,
     }
+    # Optionally index chat turns into memory for future retrieval (scoped by user)
+    try:
+        if INDEX_CHAT_HISTORY:
+            if query_text:
+                # Index last user query
+                q_emb = convert_to_embedding(query_text)
+                try:
+                    save_embedding_to_db(
+                        db=db,
+                        content=query_text,
+                        embedding=q_emb,
+                        user_id=(str(user_id) if user_id else None),
+                        tags=["chat"],
+                        source="chat",
+                        metadata={"role": "user", "request_id": get_request_id()},
+                    )
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    # Retry without user scoping if FK constraint blocks insert
+                    save_embedding_to_db(
+                        db=db,
+                        content=query_text,
+                        embedding=q_emb,
+                        user_id=None,
+                        tags=["chat"],
+                        source="chat",
+                        metadata={
+                            "role": "user",
+                            "request_id": get_request_id(),
+                            "retry_unscoped": True,
+                        },
+                    )
+            if isinstance(content, str) and content:
+                a_emb = convert_to_embedding(content)
+                try:
+                    save_embedding_to_db(
+                        db=db,
+                        content=content,
+                        embedding=a_emb,
+                        user_id=(str(user_id) if user_id else None),
+                        tags=["chat"],
+                        source="chat",
+                        metadata={
+                            "role": "assistant",
+                            "request_id": get_request_id(),
+                            "model": resp_model,
+                            "completion_id": completion_id,
+                        },
+                    )
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    save_embedding_to_db(
+                        db=db,
+                        content=content,
+                        embedding=a_emb,
+                        user_id=None,
+                        tags=["chat"],
+                        source="chat",
+                        metadata={
+                            "role": "assistant",
+                            "request_id": get_request_id(),
+                            "model": resp_model,
+                            "completion_id": completion_id,
+                            "retry_unscoped": True,
+                        },
+                    )
+            logger.info(
+                "chat_history_indexed",
+                extra={"enabled": True, "user_id": (str(user_id) if user_id else None)},
+            )
+    except Exception as e:
+        logger.warning("chat_history_index_failed", extra={"error": str(e)})
     # Persist raw conversation log (offline-friendly, no external deps)
     try:
         latency_ms = int((_time() - _t0) * 1000)
         # Determine provider string based on DEV_FALLBACKS
         provider = "openai" if (not DEV_FALLBACKS and OPENAI_API_KEY) else "local_fallback"
+        # Ensure the session is not in a failed state after any prior error
+        try:
+            db.rollback()
+        except Exception:
+            pass
         # Safely insert into raw_conversations via SQL to avoid adding ORM model for now
         insert_sql = (
-            "INSERT INTO raw_conversations (id, created_at, request_id, provider, model, "
+            "INSERT INTO raw_conversations (id, created_at, request_id, user_id, provider, model, "
             "messages, response, status_code, latency_ms) "
-            "VALUES (:id, now(), :request_id, :provider, :model, :messages, :response, "
+            "VALUES (:id, now(), :request_id, :user_id, :provider, :model, :messages, :response, "
             ":status_code, :latency_ms)"
         )
-        db.execute(
-            text(insert_sql),
-            {
-                "id": str(uuid4()),
-                "request_id": get_request_id(),
-                "provider": provider,
-                "model": resp_model,
-                "messages": json.dumps(messages),
-                "response": json.dumps(out),
-                "status_code": 200,
-                "latency_ms": latency_ms,
-            },
-        )
-        db.commit()
+        try:
+            db.execute(
+                text(insert_sql),
+                {
+                    "id": str(uuid4()),
+                    "request_id": get_request_id(),
+                    "user_id": str(user_id) if user_id else None,
+                    "provider": provider,
+                    "model": resp_model,
+                    "messages": json.dumps(messages),
+                    "response": json.dumps(out),
+                    "status_code": 200,
+                    "latency_ms": latency_ms,
+                },
+            )
+            db.commit()
+        except Exception as _e:
+            # If FK violation occurs on user_id, retry without user association
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            err_msg = str(_e)
+            if "raw_conversations_user_id_fkey" in err_msg or "foreign key" in err_msg.lower():
+                db.execute(
+                    text(insert_sql),
+                    {
+                        "id": str(uuid4()),
+                        "request_id": get_request_id(),
+                        "user_id": None,
+                        "provider": provider,
+                        "model": resp_model,
+                        "messages": json.dumps(messages),
+                        "response": json.dumps(out),
+                        "status_code": 200,
+                        "latency_ms": latency_ms,
+                    },
+                )
+                db.commit()
+                logger.info(
+                    "raw_conversations_saved_unscoped",
+                    extra={"request_id": get_request_id(), "latency_ms": latency_ms},
+                )
+            else:
+                raise
         logger.info(
             "raw_conversations_saved",
             extra={

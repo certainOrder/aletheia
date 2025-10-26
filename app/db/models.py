@@ -43,3 +43,24 @@ class MemoryShard(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - repr aid
         return f"<MemoryShard id={self.id} user_id={self.user_id}>"
+
+
+class UserProfile(Base):
+    """Minimal user profile table to link external users to UUIDs used in shards.
+
+    This enables scoping and satisfies potential DB-level foreign keys. In dev, the table
+    will be auto-created via Base.metadata.create_all; in production, prefer migrations.
+    """
+
+    __tablename__ = "user_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[Optional[str]] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    # Original external identifier (e.g., OpenWebUI username or id)
+    external_id: Mapped[Optional[str]] = mapped_column(Text, unique=True, nullable=True)
+    display_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover - repr aid
+        return f"<UserProfile id={self.id} external_id={self.external_id}>"

@@ -82,3 +82,17 @@ DEV_FALLBACKS: bool = (env("DEV_FALLBACKS", "false") or "false").lower() in {
 
 # Logging
 LOG_LEVEL: str = env("LOG_LEVEL", "INFO") or "INFO"
+LOG_REQUEST_HEADERS: bool = (env("LOG_REQUEST_HEADERS", "false") or "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+# Chat history indexing (optional)
+INDEX_CHAT_HISTORY: bool = (env("INDEX_CHAT_HISTORY", "false") or "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}

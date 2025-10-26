@@ -27,3 +27,17 @@ class IndexMemoryRequest(BaseModel):
     content: str
     user_id: str | None = None
     tags: list[str] | None = None
+    # New in M3: provenance and flexible metadata
+    source: str | None = None
+    metadata: dict | None = None
+
+
+class IngestRequest(BaseModel):
+    """Ingest large content by chunking and indexing each chunk."""
+
+    content: str
+    user_id: str | None = None
+    tags: list[str] | None = None
+    # New in M3: provenance and flexible metadata
+    source: str | None = None
+    metadata: dict | None = None

@@ -21,6 +21,15 @@ Copy `.env.example` to `.env` and adjust as needed.
 - `EMBEDDING_DIM`: Defaults to `1536` and must match the DB vector column dim.
 - `ALLOWED_ORIGINS`: Comma-separated list for CORS.
 - `DEV_FALLBACKS`: When `true`, the API uses deterministic local fallbacks for embeddings and chat so you can develop without an OpenAI key. Defaults to `false` in `.env.example`; set to `true` for local Docker runs in `.env`.
+ - `SIMILARITY_METRIC`: Retrieval metric; defaults to `cosine` (recommended for OpenAI embeddings).
+- `CHUNK_SIZE`: Maximum characters per chunk during ingestion; defaults to `800`.
+- `CHUNK_OVERLAP`: Overlapping characters between consecutive chunks; defaults to `100`.
+ - `HISTORY_TURNS`: Number of recent user turns to retain when assembling prompts; defaults to `5`.
+ - `MAX_PROMPT_TOKENS`: Approximate upper bound for prompt tokens; defaults to `40000`. The server will
+   drop oldest history first, then truncate context, and finally trim the last user message to remain
+   within this budget.
+ - `PGVECTOR_ENABLE_IVFFLAT`: When `true` (default), Alembic migration `0003` creates an IVFFlat index on `memory_shards.embedding` using the cosine opclass.
+ - `PGVECTOR_IVFFLAT_LISTS`: Number of lists for IVFFlat (default `100`). Higher values improve recall at the cost of index size and build time.
 
 ### Recommended `.env` for Docker Compose
 
@@ -60,6 +69,32 @@ curl -s -X POST http://localhost:8000/index-memory \
   -d '{"content":"OpenAI released new embedding models.","metadata":{"source":"smoke-test"}}'
 ```
 
+**M3: Index with source and metadata:**
+
+```bash
+curl -s -X POST http://localhost:8000/index-memory \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "content":"Oranges are rich in vitamin C and antioxidants.",
+    "tags":["nutrition","citrus"],
+    "source":"https://example.com/health-benefits",
+    "metadata":{"topic":"health","verified":true}
+  }'
+```
+
+**M3: Ingest (chunked) with provenance:**
+
+```bash
+curl -s -X POST http://localhost:8000/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "content":"Very long article content here...",
+    "tags":["article"],
+    "source":"batch-import-2024",
+    "metadata":{"batch_id":"abc123","priority":"high"}
+  }'
+```
+
 4) RAG chat query:
 
 ```bash
@@ -76,7 +111,39 @@ curl -s -X POST http://localhost:8000/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"OpenAI released new embedding models."}]}'
 ```
 
+**M3: Verify aletheia_context includes source and metadata:**
+
+```bash
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"What are the health benefits of oranges?"}]}' \
+  | jq '.aletheia_context[0] | {content: .content[:60], score, source, metadata}'
+```
+
+Expected response (if content was indexed with source/metadata):
+```json
+{
+  "content": "Oranges are rich in vitamin C and antioxidants.",
+  "score": 0.723,
+  "source": "https://example.com/health-benefits",
+  "metadata": {
+    "topic": "health",
+    "verified": true
+  }
+}
+```
+
 If `DEV_FALLBACKS=true`, responses are generated locally; otherwise, real OpenAI calls are made (requires `OPENAI_API_KEY`).
+
+### IVFFlat tuning and ANALYZE
+
+- The IVFFlat index is created by migration `0003` when `PGVECTOR_ENABLE_IVFFLAT=true`.
+- You can tune the number of lists with `PGVECTOR_IVFFLAT_LISTS` (e.g., 100–2048 depending on corpus size).
+- After index creation or large ingests, run `ANALYZE` to help the planner choose the index:
+
+```bash
+docker compose exec db bash -lc "psql -U $POSTGRES_USER -d $POSTGRES_DB -c 'ANALYZE memory_shards'"
+```
 
 ---
 
@@ -98,6 +165,11 @@ Key log events (JSON formatted):
 - `semantic_search` — retrieval stats: `limit`, `user_id`, `result_count`.
 - `chat_request` / `chat_result` — provider used and result choice count.
 - `completion_result` — final completion with `model`, `content_len`, `context_count`.
+ - `history_trim` — number of history messages dropped to satisfy `HISTORY_TURNS`.
+ - `token_budget_drop_history` — oldest history entry dropped due to token budget.
+ - `token_budget_trim_context` — retrieved context truncated to fit the prompt budget.
+ - `token_budget_trim_last_user` — last user message truncated to fit the prompt budget.
+ - `token_budget_enforced` — summary of token counts pre-/post-enforcement and the budget ceiling.
 
 Each log line includes a `request_id` header for correlation. The response also returns `X-Request-ID`.
 
@@ -157,7 +229,7 @@ If the key is missing/invalid while `DEV_FALLBACKS=false`, you should see a clea
 ## Notes
 
 - Dev fallbacks are meant for local usage only. Consider guarding these behind `DEV_FALLBACKS=false` in production deployments.
-- Current similarity metric is L2 distance. Consider adding cosine distance and IVFFlat index for scale.
+- Retrieval uses cosine similarity by default and surfaces scores in API responses (`aletheia_context`). IVFFlat indexing is available and gated by env.
 
 ## Logging and Error Model (dev)
 

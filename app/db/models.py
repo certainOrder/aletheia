@@ -1,28 +1,42 @@
+"""SQLAlchemy 2.0 typed ORM models for Aletheia.
+
+Defines `MemoryShard`, which stores content, tags, user association, and a pgvector
+embedding used for semantic search and RAG context retrieval.
+"""
+
 import uuid
-from sqlalchemy import Column, Text, Float, DateTime, func
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from typing import Optional
+
 from pgvector.sqlalchemy import Vector
+from sqlalchemy import DateTime, Float, Text, func
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
 from app.config import EMBEDDING_DIM
 
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 
 class MemoryShard(Base):
     __tablename__ = "memory_shards"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    last_accessed = Column(DateTime(timezone=True))
-    user_id = Column(UUID(as_uuid=True), nullable=True)
-    content = Column(Text, nullable=False)
-    source_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
-    tags = Column(ARRAY(Text), nullable=True)
-    embedding = Column(Vector(EMBEDDING_DIM), nullable=False)
-    importance = Column(Float, nullable=True)
-    priority_score = Column(Float, nullable=True)
-    retention_policy = Column(Text, nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    timestamp: Mapped[Optional[str]] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_accessed: Mapped[Optional[str]] = mapped_column(DateTime(timezone=True), nullable=True)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_ids: Mapped[Optional[list[uuid.UUID]]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=True
+    )
+    tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
+    importance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    priority_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    retention_policy: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> str:  # pragma: no cover - repr aid
         return f"<MemoryShard id={self.id} user_id={self.user_id}>"

@@ -1,30 +1,78 @@
+"""FastAPI application entrypoint and top-level routes.
 
-from fastapi import FastAPI, Depends
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from dotenv import load_dotenv
+This module wires the API router, CORS, and provides OpenAI-compatible chat endpoints
+and a simple RAG flow. In development, deterministic fallbacks are available to run
+offline tests without external dependencies.
+"""
+
+import logging
 import os
+from contextlib import asynccontextmanager
+from time import time as _time
+from uuid import uuid4
 
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.api.routes import router as api_router
+from app.config import ALLOWED_ORIGINS, LOG_LEVEL, OPENAI_CHAT_MODEL
+from app.db import engine, get_db
+from app.db.models import Base
+from app.error_handlers import (
+    handle_http_exception,
+    handle_unhandled_exception,
+    handle_validation_error,
+)
+from app.logging_utils import RequestIdMiddleware, configure_logging
+from app.schemas import (
+    ChatRequest,
+    IndexMemoryRequest,
+    IndexMemoryResponse,
+    RAGChatRequest,
+    RAGChatResponse,
+)
+from app.security import SecurityHeadersMiddleware
+from app.services.openai_service import OpenAIService
+from app.utils.embeddings import (
+    convert_to_embedding,
+    save_embedding_to_db,
+    semantic_search,
+)
 
 # Load environment variables from .env file at startup
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+logger = logging.getLogger("app.flow")
 
 
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from app.services.openai_service import OpenAIService
-from app.config import ALLOWED_ORIGINS, OPENAI_CHAT_MODEL
-from fastapi.middleware.cors import CORSMiddleware
-from app.db import get_db, engine
-from sqlalchemy.orm import Session
-from app.utils.embeddings import convert_to_embedding, semantic_search, save_embedding_to_db
-from app.db.models import Base
-from app.api.routes import router as api_router
-from sqlalchemy import text
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """App lifespan to initialize database extensions and tables in dev.
+
+    In production deployments, prefer Alembic migrations.
+    """
+    try:
+        # Configure structured logging early
+        configure_logging(LOG_LEVEL)
+        logging.getLogger("app").info(
+            "startup_config",
+            extra={
+                "log_level": LOG_LEVEL,
+                "cors_origins_count": len(ALLOWED_ORIGINS),
+            },
+        )
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        Base.metadata.create_all(bind=engine)
+    except Exception:
+        # Silent failure; prefer Alembic in production
+        pass
+    yield
 
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 # CORS
 app.add_middleware(
@@ -35,43 +83,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include additional API routes
-app.include_router(api_router)
+# Request ID middleware & basic request logging
+app.add_middleware(RequestIdMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
-# Serve static files (for chat UI)
-app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+# Include additional API routes under a stable "/api" prefix
+app.include_router(api_router, prefix="/api")
 
-# Route for chat UI
-@app.get("/chat")
-def chat_ui():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "chat.html"))
-
-
-# Request model for OpenAI chat
-class ChatRequest(BaseModel):
-    prompt: str
 
 # POST endpoint to test OpenAI integration
-@app.post("/openai-chat")
+@app.post("/openai-chat", tags=["chat"], response_model=dict)
 async def openai_chat(request: ChatRequest):
+    """Invoke the OpenAI service (or fallback) with a simple prompt payload."""
+    logger.info("route_openai_chat", extra={"prompt_len": len(request.prompt or "")})
     service = OpenAIService()
     response = service.get_response(request.prompt)
     return {"response": response}
 
-@app.get("/")
+
+@app.get("/", tags=["misc"], summary="Liveness root")
 def read_root():
+    """Basic liveness message for root path."""
     return {"message": "Hello, World!"}
 
 
-# RAG Chat endpoint: generates embedding from user prompt, searches memory_shards, adds context, and calls OpenAI
-class RAGChatRequest(BaseModel):
-    prompt: str
-    user_id: str | None = None
-    top_k: int = 5
-
-
-@app.post("/rag-chat")
+@app.post(
+    "/rag-chat",
+    tags=["rag"],
+    response_model=RAGChatResponse,
+)
 async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
+    """RAG flow: embed query, retrieve context, and call chat provider (or fallback)."""
+    logger.info(
+        "route_rag_chat",
+        extra={"prompt_len": len(req.prompt or ""), "top_k": req.top_k, "user_id": req.user_id},
+    )
     query_vec = convert_to_embedding(req.prompt)
     results = semantic_search(db, query_vec, user_id=req.user_id, limit=req.top_k)
     context_chunks = [r["content"] for r in results]
@@ -86,54 +132,54 @@ async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
     ]
     service = OpenAIService()
     response = service.chat(messages)
-    answer = response.choices[0].message.content
+    # Support both dict fallback and OpenAI SDK response
+    if isinstance(response, dict):
+        answer = response["choices"][0]["message"]["content"]
+    else:
+        answer = response.choices[0].message.content
+    logger.info(
+        "route_rag_result",
+        extra={"context_count": len(results), "answer_len": len(answer or "")},
+    )
     return {"answer": answer, "context": results}
 
 
-@app.on_event("startup")
-def on_startup():
-    # Create tables if they do not exist (dev convenience)
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        Base.metadata.create_all(bind=engine)
-    except Exception:
-        # Silent failure; prefer Alembic in production
-        pass
-
-
-# Index content into memory_shards
-from typing import Optional, List
-
-
-class IndexMemoryRequest(BaseModel):
-    content: str
-    user_id: Optional[str] = None
-    tags: Optional[List[str]] = None
-
-
-@app.post("/index-memory")
+@app.post(
+    "/index-memory",
+    tags=["indexing"],
+    response_model=IndexMemoryResponse,
+)
 async def index_memory(req: IndexMemoryRequest, db: Session = Depends(get_db)):
+    """Compute an embedding for content and persist it as a memory shard."""
+    logger.info(
+        "route_index_memory",
+        extra={"content_len": len(req.content or ""), "tags_count": len(req.tags or [])},
+    )
     emb = convert_to_embedding(req.content)
-    shard = save_embedding_to_db(db=db, content=req.content, embedding=emb, user_id=req.user_id, tags=req.tags)
+    shard = save_embedding_to_db(
+        db=db, content=req.content, embedding=emb, user_id=req.user_id, tags=req.tags
+    )
+    logger.info("route_index_memory_result", extra={"shard_id": str(shard.id)})
     return {"id": str(shard.id)}
 
 
 # OpenAI-compatible chat completions endpoint for OpenWebUI
-from time import time as _time
-from uuid import uuid4
-
-
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", tags=["openai-compat"], response_model=dict)
 async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
+    """OpenAI-compatible Chat Completions endpoint with optional RAG context injection."""
     # Expecting { model?: str, messages: [{role, content}, ...], stream?: bool }
     messages = payload.get("messages", [])
     model = payload.get("model")
+    logger.info(
+        "route_v1_chat_completions",
+        extra={"messages_count": len(messages or []), "model": model or OPENAI_CHAT_MODEL},
+    )
     # Heuristic: use last user message as query for retrieval
     user_messages = [m for m in messages if m.get("role") == "user" and m.get("content")]
     query_text = user_messages[-1]["content"] if user_messages else ""
     context_results = []
     if query_text:
+        logger.info("retrieval_begin", extra={"query_len": len(query_text or "")})
         qvec = convert_to_embedding(query_text)
         context_results = semantic_search(db, qvec, limit=5)
         context_text = "\n\n---\n\n".join(r["content"] for r in context_results)
@@ -142,21 +188,35 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
             "You are a helpful assistant. Use the provided context if relevant. "
             "Cite facts from context explicitly. If context is empty, answer normally."
         )
-        messages = (
-            [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"Context:\n{context_text}"}]
-            + messages
-        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Context:\n{context_text}"},
+        ] + messages
 
     service = OpenAIService()
     resp = service.chat(messages, model=model)
-    content = resp.choices[0].message.content
+    # Support dict fallback and SDK response shape
+    if isinstance(resp, dict):
+        content = resp["choices"][0]["message"]["content"]
+        resp_model = resp.get("model", model or OPENAI_CHAT_MODEL)
+    else:
+        content = resp.choices[0].message.content
+        resp_model = resp.model
     completion_id = f"chatcmpl-{uuid4()}"
     created = int(_time())
+    logger.info(
+        "completion_result",
+        extra={
+            "model": resp_model,
+            "content_len": len(content or ""),
+            "context_count": len(context_results),
+        },
+    )
     out = {
         "id": completion_id,
         "object": "chat.completion",
         "created": created,
-        "model": model or resp.model,
+        "model": resp_model,
         "choices": [
             {
                 "index": 0,
@@ -170,8 +230,9 @@ async def v1_chat_completions(payload: dict, db: Session = Depends(get_db)):
     return out
 
 
-@app.get("/v1/models")
+@app.get("/v1/models", tags=["openai-compat"], response_model=dict)
 async def v1_models():
+    """List available models, compatible with OpenAI `/v1/models`."""
     return {
         "object": "list",
         "data": [
@@ -189,3 +250,16 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+
+# Exception handlers (registered after routes/middleware)
+app.add_exception_handler(Exception, handle_unhandled_exception)
+from collections.abc import Awaitable, Callable  # noqa: E402
+from typing import cast  # noqa: E402
+
+from fastapi import HTTPException  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from starlette.responses import Response  # noqa: E402
+
+GenericHandler = Callable[..., Response | Awaitable[Response]]
+app.add_exception_handler(HTTPException, cast(GenericHandler, handle_http_exception))
+app.add_exception_handler(RequestValidationError, cast(GenericHandler, handle_validation_error))

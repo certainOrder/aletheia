@@ -1,0 +1,8 @@
+# Development and testing requirements
+pre-commit
+ruff
+black
+mypy
+pytest
+pytest-cov
+alembic

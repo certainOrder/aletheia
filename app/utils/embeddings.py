@@ -1,21 +1,71 @@
-from typing import List, Optional
+"""Embedding utilities and simple vector search helpers.
+
+Provides a deterministic local embedding fallback for development and tests.
+"""
+
+import hashlib
+import logging
+import random
+from typing import Any, Optional, cast
+
 from openai import OpenAI
 from sqlalchemy.orm import Session
-from app.config import OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL
+
+from app.config import DEV_FALLBACKS, EMBEDDING_DIM, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL
 from app.db.models import MemoryShard
 
+logger = logging.getLogger("app.flow")
 
-def convert_to_embedding(text_input: str) -> List[float]:
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    result = client.embeddings.create(model=OPENAI_EMBEDDING_MODEL, input=text_input)
-    return result.data[0].embedding  # list[float]
+
+def convert_to_embedding(text_input: str) -> list[float]:
+    """
+    Convert text to an embedding using OpenAI. If authentication fails or
+    OpenAI is unreachable, fall back to a deterministic local embedding so
+    development smoke tests can proceed without a real key.
+    """
+    try:
+        logger.info(
+            "embed_request",
+            extra={
+                "text_len": len(text_input or ""),
+                "provider": (
+                    "openai" if (not DEV_FALLBACKS and OPENAI_API_KEY) else "local_fallback"
+                ),
+            },
+        )
+        if not DEV_FALLBACKS:
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            # The OpenAI SDK types model as a Literal of known models; our config is a str.
+            # Cast to Any here to satisfy mypy while keeping runtime flexibility.
+            result = client.embeddings.create(
+                model=cast(Any, OPENAI_EMBEDDING_MODEL), input=text_input
+            )
+            emb = result.data[0].embedding  # list[float]
+            logger.info("embed_result", extra={"dim": len(emb), "provider": "openai"})
+            return emb
+        else:
+            raise RuntimeError("DEV_FALLBACKS enabled")
+    except Exception as e:  # fallback for local/dev without keys
+        if not DEV_FALLBACKS:
+            logging.warning(
+                "Falling back to local deterministic embedding due to embedding provider error: %s",
+                e,
+            )
+        # Deterministic embedding based on SHA256 of input
+        h = hashlib.sha256(text_input.encode("utf-8")).hexdigest()
+        seed = int(h[:16], 16)
+        rng = random.Random(seed)
+        # Generate EMBEDDING_DIM floats in [-1.0, 1.0]
+        emb = [rng.uniform(-1.0, 1.0) for _ in range(EMBEDDING_DIM)]
+        logger.info("embed_result", extra={"dim": len(emb), "provider": "local_fallback"})
+        return emb
 
 
 def save_embedding_to_db(
     *,
     db: Session,
     content: str,
-    embedding: List[float],
+    embedding: list[float],
     user_id: Optional[str] = None,
     tags: Optional[list[str]] = None,
 ):
@@ -28,15 +78,29 @@ def save_embedding_to_db(
     db.add(shard)
     db.commit()
     db.refresh(shard)
+    logger.info(
+        "embedding_saved",
+        extra={
+            "shard_id": str(shard.id),
+            "content_len": len(content or ""),
+            "tags_count": len(tags or []),
+        },
+    )
     return shard
 
 
-def semantic_search(db: Session, query_embedding: List[float], user_id: Optional[str] = None, limit: int = 5):
+def semantic_search(
+    db: Session, query_embedding: list[float], user_id: Optional[str] = None, limit: int = 5
+):
     q = db.query(MemoryShard)
     if user_id:
         q = q.filter(MemoryShard.user_id == user_id)
     q = q.order_by(MemoryShard.embedding.l2_distance(query_embedding)).limit(limit)
     rows = q.all()
+    logger.info(
+        "semantic_search",
+        extra={"limit": limit, "user_id": user_id, "result_count": len(rows)},
+    )
     return [
         {
             "id": str(r.id),

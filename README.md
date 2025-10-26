@@ -1,11 +1,19 @@
-# OpenAI PGVector API
+# Aletheia: OpenAI-compatible RAG API (FastAPI + pgvector)
 
-This project is an API that interfaces between an OpenAI CustomGPT and a local PostgreSQL database using pgvector embeddings. It is designed to facilitate the interaction between the AI model and the database, allowing for efficient storage and retrieval of embeddings.
+This repository provides a FastAPI service exposing OpenAI-compatible endpoints and a RAG flow backed by PostgreSQL with `pgvector`. It includes a Docker Compose dev environment with OpenWebUI.
+
+For local development and smoke test instructions, see `docs/DEV_ENVIRONMENT.md`.
+
+For the Phase 1 scope, milestones, and acceptance criteria, see `docs/Implementation_Plan_Phase_1.md`.
+
+For Phase 2 (“real model” testing, reliability, and UX), see `docs/Phase_2_Plan.md`.
+
+For contribution guidance tailored for AI assistants (and humans), see `.github/copilot-instructions.md`.
 
 ## Project Structure
 
 ```
-openai_pgvector_api
+aletheia
 ├── app
 │   ├── __init__.py
 │   ├── main.py
@@ -28,7 +36,7 @@ openai_pgvector_api
 1. **Clone the repository:**
    ```
    git clone <repository-url>
-   cd openai_pgvector_api
+   cd aletheia
    ```
 
 2. **Create a virtual environment:**
@@ -42,21 +50,93 @@ openai_pgvector_api
    pip install -r requirements.txt
    ```
 
-4. **Set up the PostgreSQL database:**
-   - Ensure PostgreSQL is installed and running.
-   - Create a database for the project.
-   - Update the database connection settings in `app/db/models.py`.
-
-5. **Run the application:**
+4. **Run with Docker Compose (recommended):**
    ```
-   python app/main.py
+   cp .env.example .env
+   docker compose up -d --build
+   ```
+
+   Services:
+   - API: `http://localhost:8000`
+   - OpenWebUI: `http://localhost:3000`
+
+5. **Run directly (advanced):**
+   ```
+   python3.11 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
    ```
 
 ## Usage
 
-- The API will be accessible at `http://localhost:8000`.
-- You can interact with the API using tools like Postman or curl.
+- The API is accessible at `http://localhost:8000`.
+- Smoke tests and detailed dev instructions: see `docs/DEV_ENVIRONMENT.md`.
+- Phase 1 scope: `docs/Implementation_Plan_Phase_1.md`.
+- Phase 2 plan: `docs/Phase_2_Plan.md`.
+
+### Logging and Error Model
+
+- Structured JSON logs with correlation IDs (`X-Request-ID`). If a client provides the header, it is propagated to logs and echoed back in responses; otherwise a UUID is generated.
+- Configure log level via `LOG_LEVEL` env (default `INFO`). Examples: `DEBUG`, `INFO`, `WARNING`.
+- Centralized error responses use a consistent JSON shape:
+
+```json
+{
+   "error": "ValidationError",
+   "detail": [/* details */],
+   "status": 422,
+   "request_id": "abc-123"
+}
+```
+
+Quick example:
+
+```bash
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+   -H 'Content-Type: application/json' \
+   -H 'X-Request-ID: abc-123' \
+   -d '{"messages":[{"role":"user","content":"Hello"}]}' | jq .
+```
+
+In logs you should see JSON entries including `request_id: "abc-123"`.
+
+## Contributing (dev setup)
+
+1. Create a virtual environment and install dev tools:
+   ```bash
+   make setup
+   ```
+2. Run linters/type-checkers locally:
+   ```bash
+   make lint format typecheck
+   ```
+3. Run tests:
+   ```bash
+   make test
+   ```
 
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for more details.
+
+## API Endpoints & Schemas
+
+- Endpoints:
+   - `GET /` — Liveness
+   - `GET /api/health` — Health probe
+   - `POST /openai-chat` — Simple prompt to OpenAI (or dev fallback)
+   - `POST /index-memory` — Index content with an embedding
+   - `POST /rag-chat` — Retrieve-augment-answer using stored context
+   - `POST /v1/chat/completions` — OpenAI-compatible endpoint for OpenWebUI
+   - `GET /v1/models` — OpenAI-compatible model listing
+
+- Schemas:
+   - Requests: `ChatRequest`, `IndexMemoryRequest`, `RAGChatRequest`
+   - Responses: `IndexMemoryResponse`, `RAGChatResponse`
+
+OpenAPI docs are available at:
+
+```
+http://localhost:8000/docs
+```

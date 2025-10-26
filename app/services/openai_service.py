@@ -1,31 +1,120 @@
+"""OpenAI service wrapper with deterministic local fallbacks for development.
+
+Encapsulates chat and simple completion behavior while allowing offline tests
+and smoke checks when `DEV_FALLBACKS=true`.
+"""
+
+import hashlib
+import logging
+import random
+from typing import Any, cast
+
 from fastapi import HTTPException
 from openai import OpenAI
-from app.config import OPENAI_API_KEY, OPENAI_CHAT_MODEL
+
+from app.config import DEV_FALLBACKS, OPENAI_API_KEY, OPENAI_CHAT_MODEL
+
+logger = logging.getLogger("app.flow")
 
 
 class OpenAIService:
     def __init__(self, api_key: str | None = None):
+        """Initialize the OpenAI service wrapper.
+
+        If no API key is provided and dev fallbacks are enabled, remote calls will be
+        bypassed in favor of deterministic local responses suitable for tests.
+        """
         key = api_key or OPENAI_API_KEY
-        if not key:
-            raise ValueError("OPENAI_API_KEY not configured")
-        self.client = OpenAI(api_key=key)
+        self.api_key = key
+        self.client = OpenAI(api_key=key) if key else None
 
     def get_response(self, prompt: str, model: str | None = None) -> str:
+        """Return a single-turn assistant response for a given prompt.
+
+        Uses the OpenAI Chat Completions API when available; otherwise falls back
+        to a deterministic local echo-like response in development.
+        """
         try:
+            logger.info(
+                "chat_single_request",
+                extra={
+                    "model": model or OPENAI_CHAT_MODEL,
+                    "provider": (
+                        "openai" if (self.client and not DEV_FALLBACKS) else "local_fallback"
+                    ),
+                    "prompt_len": len(prompt or ""),
+                },
+            )
+            if self.client is None or DEV_FALLBACKS:
+                # Local fallback when no API key provided
+                return self._local_response(prompt)
             response = self.client.chat.completions.create(
-                model=model or OPENAI_CHAT_MODEL,
+                model=cast(Any, (model or OPENAI_CHAT_MODEL)),
                 messages=[{"role": "user", "content": prompt}],
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content or ""
+            logger.info("chat_single_result", extra={"content_len": len(content)})
+            return content
         except Exception as e:
+            if DEV_FALLBACKS:
+                # Fallback to local response in dev when remote fails
+                return self._local_response(prompt)
             raise HTTPException(status_code=500, detail=str(e))
 
-    def chat(self, messages: list[dict], model: str | None = None):
+    def chat(self, messages: list[dict[str, Any]], model: str | None = None):
+        """Send a chat conversation and return the provider response or local fallback."""
         try:
-            response = self.client.chat.completions.create(
-                model=model or OPENAI_CHAT_MODEL,
-                messages=messages,
+            logger.info(
+                "chat_request",
+                extra={
+                    "model": model or OPENAI_CHAT_MODEL,
+                    "provider": (
+                        "openai" if (self.client and not DEV_FALLBACKS) else "local_fallback"
+                    ),
+                    "messages_count": len(messages or []),
+                },
             )
+            if self.client is None or DEV_FALLBACKS:
+                return self._local_chat_response(messages, model)
+            # The SDK expects a union of specific message param types;
+            # our runtime dicts are compatible.
+            response = self.client.chat.completions.create(
+                model=cast(Any, (model or OPENAI_CHAT_MODEL)),
+                messages=cast(Any, messages),
+            )
+            logger.info("chat_result", extra={"choices": len(response.choices)})
             return response
         except Exception as e:
+            if DEV_FALLBACKS:
+                return self._local_chat_response(messages, model)
             raise HTTPException(status_code=500, detail=str(e))
+
+    # --- Local fallback helpers ---
+    def _local_response(self, prompt: str) -> str:
+        """Produce a deterministic local response for offline testing."""
+        # Extremely simple deterministic echo-like response for dev
+        seed = int(hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:8], 16)
+        rng = random.Random(seed)
+        prefixes = [
+            "Draft: ",
+            "Thought: ",
+            "Note: ",
+            "Answer: ",
+        ]
+        return prefixes[rng.randrange(len(prefixes))] + prompt
+
+    def _local_chat_response(self, messages: list[dict], model: str | None):
+        """Return a minimal OpenAI-like chat response object for local tests."""
+        # Mimic OpenAI ChatCompletion response structure minimally
+        last_user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+        content = self._local_response(last_user)
+        return {
+            "model": model or OPENAI_CHAT_MODEL,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }
+            ],
+        }

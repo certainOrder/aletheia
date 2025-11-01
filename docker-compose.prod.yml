@@ -1,0 +1,49 @@
+# Production docker-compose for deployment to logos
+# Uses external PostgreSQL (not containerized)
+# Run with: docker compose -f docker-compose.prod.yml up -d
+
+services:
+  aletheia-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aletheia-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4o}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      DEV_FALLBACKS: ${DEV_FALLBACKS:-false}
+    ports:
+      - "8000:8000"
+    networks:
+      - aletheia-network
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: openwebui
+    restart: unless-stopped
+    depends_on:
+      - aletheia-api
+    ports:
+      - "3000:8080"
+    networks:
+      - aletheia-network
+    environment:
+      OPENAI_API_BASE_URLS: "http://aletheia-api:8000/v1"
+      OPENAI_API_KEYS: "${OPENAI_API_KEY:-sk-placeholder}"
+      WEBUI_AUTH: "True"
+      TZ: ${TZ:-America/New_York}
+    volumes:
+      - openwebui-data:/app/backend/data
+
+networks:
+  aletheia-network:
+    driver: bridge
+
+volumes:
+  openwebui-data:

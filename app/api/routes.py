@@ -42,11 +42,6 @@ if (os.getenv("ENABLE_DEBUG_ENDPOINTS", "false") or "false").lower() in {
 
     @router.get("/debug/headers")
     async def debug_headers(request: Request):
-        masked = {}
-        for k, v in request.headers.items():
-            lk = k.lower()
-            if any(s in lk for s in ("authorization", "api-key", "x-api-key", "cookie")):
-                masked[k] = "***masked***"
-            else:
-                masked[k] = v
-        return {"headers": masked}
+        from app.logging_utils import mask_headers
+
+        return {"headers": mask_headers(request.headers, max_value_len=1024)}

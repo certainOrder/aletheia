@@ -323,15 +323,9 @@ async def v1_chat_completions(payload: dict, request: Request, db: Session = Dep
     # Optionally log headers (masked) for debugging client behavior like OpenWebUI
     if LOG_REQUEST_HEADERS:
         try:
-            masked = {}
-            for k, v in request.headers.items():
-                lk = k.lower()
-                if any(s in lk for s in ("authorization", "api-key", "x-api-key", "cookie")):
-                    masked[k] = "***masked***"
-                else:
-                    # clamp long values to 256 chars
-                    masked[k] = (v[:256] + "…") if isinstance(v, str) and len(v) > 256 else v
-            logger.info("request_headers", extra={"headers": masked})
+            from app.logging_utils import mask_headers
+
+            logger.info("request_headers", extra={"headers": mask_headers(request.headers)})
         except Exception:
             pass
     # Accept either OpenAI's "user" field or a custom "user_id"; prefer user_id

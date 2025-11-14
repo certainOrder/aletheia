@@ -13,7 +13,7 @@ import sys
 import time
 import uuid
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, Mapping
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -130,3 +130,25 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             },
         )
         return response
+
+
+def mask_headers(headers: Mapping[str, str], max_value_len: int = 256) -> dict[str, str]:
+    """Return a masked copy of headers for safe logging.
+
+    - Masks sensitive keys like Authorization, API keys, and Cookies
+    - Optionally truncates long values to keep logs compact
+    """
+    masked: dict[str, str] = {}
+    try:
+        for k, v in headers.items():
+            lk = k.lower()
+            if any(s in lk for s in ("authorization", "api-key", "x-api-key", "cookie")):
+                masked[k] = "***masked***"
+            else:
+                if isinstance(v, str) and len(v) > max_value_len:
+                    masked[k] = v[:max_value_len] + "…"
+                else:
+                    masked[k] = v
+    except Exception:  # pragma: no cover - defensive only
+        pass
+    return masked
